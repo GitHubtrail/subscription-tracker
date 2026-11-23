@@ -1,0 +1,164 @@
+import tempfile
+import unittest
+from datetime import date
+from pathlib import Path
+
+from subtracker.detect import fees_by_card, find_subscriptions, merchant_name
+from subtracker.parse import card_name_from_file, parse_amount, read_csv, read_folder
+from subtracker.report import html_report, text_report
+
+FIXTURES = Path(__file__).parent / "fixtures"
+TODAY = date(2026, 11, 23)
+
+
+def subs_by_name(subs):
+    return {(s.name, s.amount): s for s in subs}
+
+
+class ParseTests(unittest.TestCase):
+    def test_amounts(self):
+        self.assertEqual(parse_amount("$1,234.50"), 1234.5)
+        self.assertEqual(parse_amount("(12.00)"), -12.0)
+        self.assertEqual(parse_amount("-5"), -5.0)
+        self.assertEqual(parse_amount("7.25 CR"), -7.25)
+        self.assertIsNone(parse_amount(""))
+
+    def test_card_name_from_file(self):
+        self.assertEqual(card_name_from_file(Path("chase-sapphire-2025.csv")), "Chase Sapphire")
+        self.assertEqual(card_name_from_file(Path("capitalone_1234_2026.csv")), "Capital One")
+
+    def test_capital_one_debit_credit_columns(self):
+        rows = read_csv(FIXTURES / "capital-one-2025.csv")
+        self.assertTrue(rows)
+        self.assertTrue(all(t.amount > 0 for t in rows))
+        self.assertEqual(rows[0].card, "Capital One ••4821")
+        self.assertFalse(any("PYMT" in t.description for t in rows))
+
+    def test_card_names_from_overrides(self):
+        rows = read_csv(FIXTURES / "capital-one-2025.csv", card_names={"4821": "Family card"})
+        self.assertEqual(rows[0].card, "Family card")
+
+    def test_negative_purchases_are_flipped(self):
+        rows = read_csv(FIXTURES / "chase-freedom.csv")
+        self.assertTrue(all(t.amount > 0 for t in rows))
+        self.assertFalse(any("Payment" in t.description for t in rows))
+
+    def test_header_after_summary_lines(self):
+        rows = read_csv(FIXTURES / "amex-gold-2026.csv")
+        self.assertEqual(rows[0].card, "Amex Gold")
+        self.assertFalse(any("AUTOPAY" in t.description for t in rows))
+
+    def test_unreadable_file_is_reported_not_fatal(self):
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "junk.csv").write_text("a,b,c\n1,2,3\n")
+            Path(d, "amex-gold-2026.csv").write_text((FIXTURES / "amex-gold-2026.csv").read_text())
+            rows, problems = read_folder(Path(d))
+            self.assertTrue(rows)
+            self.assertEqual(len(problems), 1)
+
+    def test_overlapping_exports_are_not_double_counted(self):
+        with tempfile.TemporaryDirectory() as d:
+            text = (FIXTURES / "amex-gold-2026.csv").read_text()
+            Path(d, "amex-gold-2025.csv").write_text(text)
+            Path(d, "amex-gold-2026.csv").write_text(text)
+            rows, _ = read_folder(Path(d))
+            self.assertEqual(len(rows), len(read_csv(FIXTURES / "amex-gold-2026.csv")))
+
+
+class DetectTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.rows, _ = read_folder(FIXTURES)
+        cls.subs, cls.possible = find_subscriptions(cls.rows, TODAY)
+        cls.by = subs_by_name(cls.subs)
+
+    def test_merchant_names(self):
+        self.assertEqual(merchant_name("NETFLIX.COM 866-579-7172 CA")[0], "Netflix")
+        self.assertEqual(merchant_name("KINDLE UNLTD*NK54U3EH1")[0], "Kindle Unlimited")
+        self.assertEqual(merchant_name("SQ *CORNER BAKERY CLUB")[0], "Corner Bakery Club")
+
+    def test_monthly_with_price_change(self):
+        s = self.by[("Netflix", 17.99)]
+        self.assertTrue(s.active)
+        self.assertTrue(s.price_changed)
+        self.assertEqual(s.frequency, "Monthly")
+        self.assertEqual(s.next_renewal, date(2026, 12, 3))
+
+    def test_two_plans_same_company(self):
+        self.assertIn(("Apple (App Store / iCloud)", 2.99), self.by)
+        self.assertIn(("Apple (App Store / iCloud)", 10.99), self.by)
+
+    def test_cancelled_shows_as_stopped(self):
+        s = self.by[("Planet Fitness", 24.99)]
+        self.assertFalse(s.active)
+        self.assertEqual(s.last_charged, date(2025, 9, 20))
+
+    def test_yearly_and_quarterly(self):
+        self.assertEqual(self.by[("Costco Membership", 65.0)].frequency, "Yearly")
+        self.assertEqual(self.by[("New York Times", 25.0)].frequency, "Quarterly")
+
+    def test_unknown_merchant_detected_by_pattern(self):
+        self.assertIn(("Corner Bakery Club", 30.0), self.by)
+
+    def test_shopping_is_not_a_subscription(self):
+        names = {s.name for s in self.subs}
+        for shop in ["Heb", "Shell Oil", "Target", "Starbucks Store", "Wholefds Arb", "Uber", "Safeway"]:
+            self.assertFalse(any(shop in n for n in names), shop)
+
+    def test_single_charge_of_known_service_is_flagged(self):
+        self.assertEqual([p.name for p in self.possible], ["Disney+"])
+
+    def test_overrides(self):
+        subs, _ = find_subscriptions(self.rows, TODAY, {
+            "ignore": ["spotify"], "rename": {"netflix": "Netflix Premium"}})
+        names = {s.name for s in subs}
+        self.assertNotIn("Spotify", names)
+        self.assertIn("Netflix Premium", names)
+
+    def test_auto_top_up(self):
+        from subtracker.parse import Transaction
+        days = [date(2026, 1, 5), date(2026, 2, 20), date(2026, 3, 25), date(2026, 5, 15), date(2026, 6, 28)]
+        rows = [Transaction(d, "IL TOLLWAY-AUTOREPLENISH", 99.0, "Card", "x") for d in days]
+        subs, _ = find_subscriptions(rows, date(2026, 7, 1))
+        self.assertEqual(len(subs), 1)
+        self.assertIn("auto top-up", subs[0].frequency)
+
+
+    def test_bills_with_varying_amounts(self):
+        from subtracker.parse import Transaction
+        bills = [(date(2026, 1, 10), 40.85), (date(2026, 3, 8), 40.85), (date(2026, 5, 9), 46.95),
+                 (date(2026, 7, 8), 46.95), (date(2026, 9, 8), 66.35)]
+        rows = [Transaction(d, "VILLAGE OF NORTH AURORA", a, "Card", "x", False, "Utilities") for d, a in bills]
+        subs, _ = find_subscriptions(rows, date(2026, 10, 1))
+        self.assertEqual(len(subs), 1)
+        self.assertTrue(subs[0].is_bill)
+        self.assertEqual(subs[0].frequency, "Every 2 months")
+
+    def test_spacing_in_description(self):
+        self.assertEqual(merchant_name("UBER   *ONE MEMBERSHIP")[0], "Uber One")
+
+
+class FeeAndReportTests(unittest.TestCase):
+    def test_fees_kept_apart(self):
+        from subtracker.parse import Transaction
+        rows = [
+            Transaction(date(2026, 1, 9), "INTEREST CHARGE:PURCHASES", 500.0, "Card", "x", True),
+            Transaction(date(2026, 2, 9), "INTEREST CHARGE:PURCHASES", 480.0, "Card", "x", True),
+            Transaction(date(2026, 2, 10), "INTEREST ADJ", -5.0, "Card", "x", True),
+        ]
+        subs, _ = find_subscriptions(rows, TODAY)
+        self.assertEqual(subs, [])
+        fees = fees_by_card(rows)
+        self.assertEqual(fees[0].last_12_months, 975.0)
+
+    def test_reports_render(self):
+        rows, problems = read_folder(FIXTURES)
+        subs, possible = find_subscriptions(rows, TODAY)
+        page = html_report(subs, possible, problems, TODAY, fees_by_card(rows))
+        self.assertIn("Netflix", page)
+        self.assertIn("per month", page)
+        self.assertIn("Netflix", text_report(subs, possible, problems))
+
+
+if __name__ == "__main__":
+    unittest.main()

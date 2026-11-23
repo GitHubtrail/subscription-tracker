@@ -1,0 +1,13 @@
+{
+  "mybank*.csv": {
+    "columns": {
+      "date": "Trans Date",
+      "description": "Merchant Info",
+      "amount": "Amt"
+    },
+    "date_format": "%d/%m/%Y",
+    "purchases_are": "negative",
+    "card": "My Bank Visa",
+    "last4": "1234"
+  }
+}

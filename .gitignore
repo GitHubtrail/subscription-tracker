@@ -1,0 +1,11 @@
+# Real bank data stays on your computer only
+data/*
+!data/README.md
+overrides.json
+formats.json
+report.html
+report.csv
+
+__pycache__/
+*.pyc
+.DS_Store

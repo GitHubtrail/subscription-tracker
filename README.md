@@ -1,3 +1,84 @@
 # Subscription tracker
 
-Finds your subscriptions in credit card CSV exports and shows what each one costs, how often it bills, which card it is on, and when it renews.
+Finds your subscriptions in credit card CSV exports and shows what each one
+costs, how often it bills, which card it is on, and when it next renews (or
+when it stopped). Everything runs on your own computer. Nothing is uploaded
+anywhere and there is no database.
+
+It needs only Python 3.10 or newer. There is nothing to install.
+
+## Use it
+
+1. Download CSV exports from each credit card website and put them in the
+   `data` folder. Any number of files, any years, any cards.
+2. Run:
+
+   ```
+   python3 tracker.py --open
+   ```
+
+   It prints a summary, then saves and opens `report.html`. It also saves
+   `report.csv` if you want the list in a spreadsheet.
+
+To have it update by itself while you add files, run
+`python3 tracker.py --watch`. It rebuilds the report whenever a file in
+`data` changes. Press Ctrl+C to stop.
+
+Your CSV files, `report.html`, `report.csv` and `overrides.json` are listed in
+`.gitignore`, so they are never committed.
+
+## What the report shows
+
+- **Active**: subscriptions still charging on schedule, with the next renewal
+  date and the cost per month. The totals at the top add up only these.
+- **Stopped or expired**: things that used to charge regularly but missed
+  their latest charge, with the date of the last one.
+- **Check these**: well-known services charged only once so far, with the
+  date they would renew if they're yearly.
+- **Bills and utilities**: water, trash and similar bills whose amount changes
+  each time. Shown with the recent average and kept out of the subscription
+  totals.
+- **Interest and fees**: interest and card fees per card over the latest 12
+  months.
+
+A charge counts as a subscription when the same merchant charges the same
+card a steady price at a regular interval (weekly up to yearly). Well-known
+services such as Netflix or Kindle Unlimited need only two charges, and a
+price change is allowed. Auto top-ups that charge the same amount at uneven
+times, like I-PASS tolls, are included too.
+
+## Name your cards, hide or add items
+
+Copy `overrides.example.json` to `overrides.json` and edit it:
+
+```json
+{
+  "cards": { "1234": "My Capital One", "5678": "Partner's Visa" },
+  "ignore": ["Twilio"],
+  "include": ["Corner Gym"],
+  "rename": { "Foxmetrowrd": "Fox Metro water" }
+}
+```
+
+- `cards`: a name for each card, by its last four digits.
+- `ignore`: merchants that shouldn't count as subscriptions.
+- `include`: merchants that should count even though the pattern isn't clear.
+- `rename`: nicer names. The left side is matched against the name shown in
+  the report.
+
+## A bank's file isn't read correctly
+
+Columns are found by name, and the common names used by Capital One, Chase,
+Amex, Citi, Discover and others are already known. If a file isn't read, the
+report says so at the top. Then either add the column name to
+`COLUMN_ALIASES` in `subtracker/parse.py`, or copy `formats.example.json` to
+`formats.json` and describe the file there.
+
+## Tests
+
+```
+python3 -m unittest
+```
+
+The tests use made-up sample files in `tests/fixtures`
+(`python3 tests/make_fixtures.py` regenerates them).
