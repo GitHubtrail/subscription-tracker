@@ -219,7 +219,7 @@ def html_report(subs, possible, problems, today: date, fees: list[CardFees] | No
 @media (prefers-color-scheme: dark) {{ :root {{ --bg:#161617; --card:#1f1f21; --text:#ececec; --muted:#9a9aa0; --line:#333336; --accent:#6fcf97; --warn:#f2a65a; }} }}
 * {{ box-sizing:border-box; }}
 body {{ margin:0; background:var(--bg); color:var(--text); font:15px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif; }}
-main {{ max-width:1000px; margin:0 auto; padding:32px 16px 64px; }}
+main {{ margin:0 auto; padding:32px 24px 64px; }}
 h1 {{ margin:0 0 4px; font-size:26px; }} h2 {{ margin:36px 0 4px; font-size:18px; }}
 .note, .sub {{ color:var(--muted); margin:0 0 12px; }}
 .totals {{ display:flex; gap:12px; flex-wrap:wrap; margin:20px 0 8px; }}
@@ -228,14 +228,17 @@ h1 {{ margin:0 0 4px; font-size:26px; }} h2 {{ margin:36px 0 4px; font-size:18px
 .tile span {{ color:var(--muted); font-size:13px; }}
 .scroll {{ overflow-x:auto; background:var(--card); border:1px solid var(--line); border-radius:10px; }}
 table {{ border-collapse:collapse; width:100%; }}
-th, td {{ text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top; white-space:nowrap; }}
+th, td {{ text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top; }}
+th, .num, .date {{ white-space:nowrap; }}
 th {{ font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); font-weight:600; }}
 tr:last-child td {{ border-bottom:0; }}
 .num {{ text-align:right; font-variant-numeric:tabular-nums; }}
-.name {{ font-weight:600; white-space:normal; min-width:170px; }}
+/* The name stays in view when a narrow window scrolls the table sideways. */
+.name, th:first-child {{ position:sticky; left:0; background:var(--card); z-index:1; }}
+.name {{ font-weight:600; min-width:150px; max-width:260px; box-shadow:1px 0 0 var(--line); }}
 .soon {{ color:var(--warn); font-weight:600; }}
-.tag {{ font-size:11px; font-weight:500; color:var(--warn); border:1px solid currentColor; border-radius:4px; padding:0 4px; margin-left:4px; }}
-details summary {{ cursor:pointer; color:var(--accent); }} details ul {{ margin:6px 0 0; padding-left:18px; color:var(--muted); }}
+.tag {{ display:table; margin-top:4px; white-space:nowrap; font-size:11px; font-weight:500; color:var(--warn); border:1px solid currentColor; border-radius:4px; padding:0 4px; }}
+details summary {{ cursor:pointer; color:var(--accent); white-space:nowrap; }} details ul {{ margin:6px 0 0; padding-left:18px; color:var(--muted); }}
 .overlaps {{ background:var(--card); border:1px solid var(--line); border-radius:10px; margin:0; padding:12px 12px 12px 32px; }}
 .overlaps li {{ margin:4px 0; }}
 .problem {{ background:var(--card); border-left:3px solid var(--warn); padding:8px 12px; }}
