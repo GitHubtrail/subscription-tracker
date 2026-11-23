@@ -2,6 +2,9 @@
   "cards": {
     "1234": "My Capital One"
   },
+  "files": {
+    "activity*.csv": "1234"
+  },
   "ignore": [
     "Twilio"
   ],

@@ -3,7 +3,7 @@ import unittest
 from datetime import date
 from pathlib import Path
 
-from subtracker.detect import fees_by_card, find_subscriptions, merchant_name
+from subtracker.detect import fees_by_card, find_subscriptions, merchant_name, stale_cards
 from subtracker.parse import card_name_from_file, parse_amount, read_csv, read_folder
 from subtracker.report import html_report, text_report
 
@@ -31,7 +31,7 @@ class ParseTests(unittest.TestCase):
         rows = [t for t in read_csv(FIXTURES / "capital-one-2025.csv") if not t.is_payment]
         self.assertTrue(rows)
         self.assertTrue(all(t.amount > 0 for t in rows))
-        self.assertEqual(rows[0].card, "Capital One ••4821")
+        self.assertEqual(rows[0].card, "Capital One x4821")
         self.assertFalse(any("PYMT" in t.description for t in rows))
 
     def test_card_names_from_overrides(self):
@@ -45,7 +45,7 @@ class ParseTests(unittest.TestCase):
 
     def test_citi_format(self):
         rows = [t for t in read_csv(FIXTURES / "citi_1234_2025.csv") if not t.is_payment]
-        self.assertEqual(rows[0].card, "Citi ••1234")
+        self.assertEqual(rows[0].card, "Citi x1234")
         self.assertFalse(any("PAYMENT" in t.description for t in rows))
         self.assertEqual(sum(t.is_fee for t in rows), 2)
 
@@ -64,7 +64,7 @@ class ParseTests(unittest.TestCase):
             rows, _ = read_folder(Path(d))
         bought = [t for t in rows if not t.is_fee and not t.is_payment]
         self.assertEqual([(t.description, t.amount) for t in bought], [("COUNSELING SERVICE", 35.0)])
-        self.assertEqual(rows[0].card, "Card ••7777")
+        self.assertEqual(rows[0].card, "Bank of America x7777")
 
     def test_barclays_format(self):
         with tempfile.TemporaryDirectory() as d:
@@ -151,8 +151,8 @@ class DetectTests(unittest.TestCase):
 
     def test_annual_card_fee(self):
         fees = {f.card: f for f in fees_by_card(self.rows)}
-        self.assertEqual(fees["Citi ••1234"].annual_fee, 50.0)
-        self.assertEqual(fees["Citi ••1234"].annual_fee_next, date(2026, 4, 21))
+        self.assertEqual(fees["Citi x1234"].annual_fee, 50.0)
+        self.assertEqual(fees["Citi x1234"].annual_fee_next, date(2026, 4, 21))
 
     def test_overrides(self):
         subs, _ = find_subscriptions(self.rows, TODAY, {
@@ -330,6 +330,102 @@ class FeeAndReportTests(unittest.TestCase):
         self.assertIn("Netflix", page)
         self.assertIn("per month", page)
         self.assertIn("Netflix", text_report(subs, possible, problems))
+
+
+class DownloadNameTests(unittest.TestCase):
+    """Files keep the names the bank gave them; the card comes from inside."""
+
+    AMEX_WITH_ACCOUNT = (
+        "Date,Description,Card Member,Account #,Amount\n"
+        "01/05/2026,NETFLIX.COM,ALEX SAMPLE,-12345,15.49\n"
+        "01/09/2026,CORNER CAFE,ALEX SAMPLE,-12345,8.25\n"
+        "01/12/2026,BOOK SHOP,ALEX SAMPLE,-12345,22.10\n")
+    AMEX_PLAIN = "Date,Description,Amount\n01/05/2026,NETFLIX.COM,15.49\n01/09/2026,CORNER CAFE,8.25\n"
+    AMEX_PLAIN_OTHER = "Date,Description,Amount\n03/03/2026,HULU,7.99\n03/04/2026,GARDEN CENTER,40.00\n"
+
+    def test_card_from_columns_not_file_name(self):
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "2026-11-22_transaction_download (2).csv").write_text(
+                (FIXTURES / "capital-one-2025.csv").read_text())
+            Path(d, "activity (15).csv").write_text(self.AMEX_WITH_ACCOUNT)
+            rows, problems = read_folder(Path(d))
+        self.assertEqual({t.card for t in rows}, {"Capital One x4821", "Amex x2345"})
+        self.assertEqual(problems, [])
+
+    def test_barclays_account_number_above_header(self):
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "CreditCard_20261122.csv").write_text(
+                "Barclays\nAccount Number: XXXXXXXXXXXX9999\n \n"
+                "Transaction Date,Description,Category,Amount,Card Last 4 Digits,Purchased by\n"
+                '11/19/2026,"STARZ ENTERTAINMENT","DEBIT","-11.99",="1234",ALEX\n'
+                '11/02/2026,"PAYMENT RECEIVED","CREDIT","50.00",="9999",ALEX\n')
+            rows, _ = read_folder(Path(d))
+        self.assertEqual({t.card for t in rows}, {"Barclays x9999"})
+
+    def test_file_without_card_number_takes_card_of_overlapping_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "activity.csv").write_text(self.AMEX_WITH_ACCOUNT)
+            Path(d, "activity (1).csv").write_text(self.AMEX_PLAIN)
+            rows, problems = read_folder(Path(d), card_names={"12345": "Alex's Amex"})
+        self.assertEqual({t.card for t in rows}, {"Alex's Amex"})
+        self.assertEqual(len([t for t in rows if "NETFLIX" in t.description]), 1)
+        self.assertEqual(problems, [])
+
+    def test_unnamed_files_are_grouped_with_one_note(self):
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "activity.csv").write_text(self.AMEX_PLAIN)
+            Path(d, "activity (1).csv").write_text(self.AMEX_PLAIN_OTHER)
+            rows, problems = read_folder(Path(d))
+        self.assertEqual({t.card for t in rows}, {"Amex (card not named)"})
+        self.assertEqual(len(problems), 1)
+        self.assertIn('"files"', problems[0])
+
+    def test_files_named_in_overrides(self):
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "activity.csv").write_text("Date,Description,Amount\n05/01/2026,SPOTIFY,11.99\n")
+            Path(d, "activity (1).csv").write_text(self.AMEX_PLAIN_OTHER)
+            Path(d, "activity (2).csv").write_text(self.AMEX_WITH_ACCOUNT)
+            rows, problems = read_folder(Path(d), card_names={"5555": "Gold", "12345": "Blue"},
+                                         files={"activity (1).csv": "Green", "activity*.csv": "5555"})
+        cards = {t.source: t.card for t in rows}
+        self.assertEqual(cards, {"activity.csv": "Gold", "activity (1).csv": "Green", "activity (2).csv": "Blue"})
+        self.assertEqual(problems, [])
+
+    def test_file_names_match_loosely(self):
+        from subtracker.parse import _name_for_file
+        files = {"Year to date 1.CSV": "Advantage", "Last_year_2025.csv": "Advantage"}
+        self.assertEqual(_name_for_file("Year to date (1).csv", files, {}), "Advantage")
+        self.assertEqual(_name_for_file("last year (2025).CSV", files, {}), "Advantage")
+        self.assertEqual(_name_for_file("Year to date (2).csv", files, {}), "")
+
+    def test_loan_file_is_recognised(self):
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "activity (7).csv").write_text(
+                "Date,Description,Amount\n10/28/2026,Interest Charge,156.01\n"
+                "10/12/2026,AUTOPAY PAYMENT - THANK YOU,-476.04\n09/12/2026,AUTOPAY PAYMENT - THANK YOU,-476.04\n")
+            rows, _ = read_folder(Path(d), card_names={"77777": "Alex's Amex Personal Loan"})
+        self.assertEqual({t.card for t in rows}, {"Alex's Amex Personal Loan"})
+
+    def test_one_out_of_date_note_per_card(self):
+        with tempfile.TemporaryDirectory() as d:
+            for name in ("Chase1111_Activity20250101_20250630_20261122.CSV",
+                         "Chase1111_Activity20250101_20250630_20261122 (1).CSV"):
+                Path(d, name).write_text((FIXTURES / "chase-freedom.csv").read_text())
+            rows, _ = read_folder(Path(d))
+        notes = stale_cards(rows, date(2027, 6, 1))
+        self.assertEqual(len(notes), 1)
+        self.assertTrue(notes[0].startswith("Chase x1111:"))
+
+    def test_report_files_are_utf8(self):
+        import tracker
+        with tempfile.TemporaryDirectory() as d:
+            data = Path(d, "data")
+            data.mkdir()
+            Path(data, "activity (15).csv").write_text(self.AMEX_WITH_ACCOUNT)
+            tracker.build(data, Path(d), TODAY, quiet=True)
+            html = Path(d, "report.html").read_bytes().decode("utf-8")
+        self.assertIn('charset="utf-8"', html)
+        self.assertIn("Amex x2345", html)
 
 
 if __name__ == "__main__":
