@@ -67,5 +67,19 @@ def amex():
         w.writerow(["03/02/2026", "SAFEWAY 1122", "SARITA", "54.10"])
         w.writerow(["05/02/2026", "AUTOPAY PAYMENT - THANK YOU", "SARITA", "-300.00"])
 
+def citi():
+    # Citi: Status/Date/Description/Debit/Credit, credits negative, no card number column.
+    with open(OUT / "citi_1234_2025.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["Status", "Date", "Description", "Debit", "Credit", "Member Name"])
+        for d in months((2025, 1), 8, 13):
+            w.writerow(["Cleared", d.strftime("%m/%d/%Y"),
+                        "D J*BARRONS 8005440422 NJ - Virtual Account Number 1111", "15.00", "", "ALEX SAMPLE"])
+        w.writerow(["Cleared", "04/21/2025", "MEMBERSHIP FEE APR 25-MAR 26", "50.00", "", "ALEX SAMPLE"])
+        w.writerow(["Cleared", "05/21/2025", "INTEREST CHARGED TO STANDARD PURCH", "60.76", "", "ALEX SAMPLE"])
+        w.writerow(["Cleared", "05/22/2025", "ONLINE PAYMENT, THANK YOU", "", "-300.00", "ALEX SAMPLE"])
+        w.writerow(["Cleared", "06/02/2025", "AIRTABLE.COM/BILL SAN FRANCISCO CA", "540.00", "", "ALEX SAMPLE"])
+        w.writerow(["Cleared", "03/14/2026", "JEWEL OSCO 3345", "42.17", "", "ALEX SAMPLE"])
+
 OUT.mkdir(exist_ok=True)
-capital_one(); chase(); amex()
+capital_one(); chase(); amex(); citi()

@@ -49,9 +49,10 @@ def text_report(subs: list[Subscription], possible: list[Possible], problems: li
             lines.append(row.format(s.name[:28], _money(s.amount), s.frequency, s.card[:28], _d(s.last_charged)))
         lines.append("")
     if possible:
-        lines.append("CHECK THESE (known services charged only once so far)")
+        lines.append("CHECK THESE (known services with no clear billing pattern yet)")
         for p in possible:
-            lines.append(f"  {p.name} {_money(p.amount)} on {p.card}, {_d(p.charged)} "
+            times = f", {p.times} charges, latest" if p.times > 1 else ""
+            lines.append(f"  {p.name} {_money(p.amount)} on {p.card}{times}, {_d(p.charged)} "
                          f"(if yearly, renews around {_d(p.renews_if_yearly)})")
         lines.append("")
     if bills:
@@ -66,6 +67,9 @@ def text_report(subs: list[Subscription], possible: list[Possible], problems: li
         for f in fees:
             lines.append(f"  {f.card}: {_money(f.last_12_months)} in the last 12 months, "
                          f"about {_money(f.per_month)} a month")
+            if f.annual_fee:
+                lines.append(f"    includes a {_money(f.annual_fee)} annual card fee, "
+                             f"next due around {_d(f.annual_fee_next)}")
     return "\n".join(lines)
 
 
@@ -126,7 +130,10 @@ def html_report(subs, possible, problems, today: date, fees: list[CardFees] | No
         for s in bills
     )
     fee_rows = "".join(
-        f"<tr><td class='name'>{e(f.card)}</td><td class='num'>{_money(f.last_12_months)}</td>"
+        f"<tr><td class='name'>{e(f.card)}"
+        + (f"<br><span class='note'>Annual fee {_money(f.annual_fee)}, next around {_d(f.annual_fee_next)}</span>"
+           if f.annual_fee else "")
+        + f"</td><td class='num'>{_money(f.last_12_months)}</td>"
         f"<td class='num'>{_money(f.per_month)}</td><td><details><summary>{len(f.charges)} charges</summary><ul>"
         + "".join(f"<li>{_d(t.date)} · {e(t.description)} · {_money(t.amount)}</li>" for t in reversed(f.charges))
         + "</ul></details></td></tr>"
@@ -183,8 +190,8 @@ details summary {{ cursor:pointer; color:var(--accent); }} details ul {{ margin:
  or "<p>No active subscriptions found yet. Add CSV files to the data folder and run it again.</p>"}
 {section("Stopped or expired", "These used to charge regularly but the latest charge didn't come.",
          ["Name", "Amount", "Billed", "Card", "Last charged", "History"], stopped_rows)}
-{section("Check these", "Well-known services charged only once so far, so the billing cycle isn't clear yet.",
-         ["Name", "Amount", "Card", "Charged", "If yearly, renews"], possible_rows)}
+{section("Check these", "Well-known services charged once, or at uneven times, so the billing cycle isn't clear yet.",
+         ["Name", "Amount", "Card", "Last charged", "If yearly, renews"], possible_rows)}
 {section(f"Bills and utilities · about {_money(bill_monthly)} a month",
          "Regular household bills. The amount changes each time, so this shows the recent average. Not counted in the subscription totals.",
          ["Name", "Average", "Billed", "Card", "Next bill (estimate)", "Per month", "History"], bill_rows)}

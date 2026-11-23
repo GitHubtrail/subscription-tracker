@@ -34,6 +34,8 @@ KNOWN_SERVICES = [
     ("LINKEDIN", "LinkedIn Premium"), ("CANVA", "Canva"), ("NOTION", "Notion"),
     ("1PASSWORD", "1Password"), ("LASTPASS", "LastPass"), ("GITHUB", "GitHub"),
     ("ZOOM.US", "Zoom"), ("CRUNCHYROLL", "Crunchyroll"), ("STARZ", "Starz"),
+    ("BARRONS", "Barron's"), ("RENDER.COM", "Render"), ("AIRTABLE", "Airtable"),
+    ("DEEPBRAIN", "DeepBrain"),
     ("UBER *ONE", "Uber One"), ("UBER ONE", "Uber One"), ("EVERNOTE", "Evernote"),
     ("DOORDASH DASHPASS", "DashPass"), ("DASHPASS", "DashPass"), ("INSTACART+", "Instacart+"),
     ("WALMART+", "Walmart+"), ("GRUBHUB+", "Grubhub+"), ("TIDAL", "Tidal"),
@@ -43,7 +45,7 @@ KNOWN_SERVICES = [
 ]
 
 # Payment processors that put their name in front of the real merchant.
-PREFIXES = re.compile(r"^(SQ|TST|SP|PP|PAYPAL|DD|IN|PY|CKO|FS|BT|BTS|WCI|GOOGLE|APLPAY|AMZN MKTP US)\s*\*\s*")
+PREFIXES = re.compile(r"^(D J|SQ|TST|SP|PP|PAYPAL|DD|IN|PY|CKO|FS|BT|BTS|WCI|GOOGLE|APLPAY|AMZN MKTP US)\s*\*\s*")
 
 # Household bills: amounts vary from bill to bill, so they're matched on
 # timing alone and listed apart from subscriptions.
@@ -109,11 +111,12 @@ class Subscription:
 
 @dataclass
 class Possible:
-    """A known service seen only once, so its billing cycle is unknown."""
+    """A known service without a clear billing pattern (often charged once)."""
     name: str
     card: str
     amount: float
     charged: date
+    times: int = 1
 
     @property
     def renews_if_yearly(self) -> date:
@@ -123,6 +126,7 @@ class Possible:
 def merchant_name(description: str) -> tuple[str, bool]:
     """Return a grouping name for a charge and whether it is a known service."""
     s = re.sub(r"\s+", " ", description.upper().strip())
+    s = re.sub(r"\s*-\s*VIRTUAL ACCOUNT NUMBER.*$", "", s)  # Citi virtual card numbers
     for needle, name in KNOWN_SERVICES:
         if needle in s + " ":
             return name, True
@@ -162,6 +166,8 @@ def _match_frequency(charges: list[Transaction], known: bool, forced: bool):
         if not lo <= typical <= hi:
             continue
         needed = 2 if known or forced else min_count
+        if len(charges) == 2 and len({t.amount for t in charges}) == 1 and days <= 31:
+            needed = 2
         if len(charges) < needed:
             return None
         # A skipped month (gap of two periods) is fine; random gaps are not.
@@ -264,14 +270,17 @@ def find_subscriptions(
         if not found:
             # Maybe the price went up partway through: try all charges together.
             freq = _match_frequency(charges, known, forced)
+            # Two charges at different prices are only convincing when close together.
+            if freq and len(charges) == 2 and freq[1] > 40 and not forced:
+                freq = None
             if freq and (known or forced):
                 changed = len({t.amount for t in charges}) > 1
                 found.append(_make(display, card, charges, freq, as_of[card], today, changed))
         if found:
             subs.extend(found)
-        elif known and len(charges) == 1:
-            t = charges[0]
-            possible.append(Possible(display, card, t.amount, t.date))
+        elif known:
+            t = charges[-1]
+            possible.append(Possible(display, card, t.amount, t.date, len(charges)))
 
     subs.sort(key=lambda s: (s.is_bill, not s.active, s.name.lower(), s.card))
     possible.sort(key=lambda p: p.charged, reverse=True)
@@ -296,12 +305,24 @@ def _join_price_changes(found: list[Subscription], as_of: date, today: date) -> 
     return out
 
 
+ANNUAL_FEE = re.compile(r"ANNUAL FEE|MEMBERSHIP FEE", re.I)
+
+
+def _add_year(d: date) -> date:
+    try:
+        return d.replace(year=d.year + 1)
+    except ValueError:  # Feb 29
+        return d.replace(year=d.year + 1, day=28)
+
+
 @dataclass
 class CardFees:
     card: str
     charges: list[Transaction]
     last_12_months: float
     per_month: float
+    annual_fee: float | None = None
+    annual_fee_next: date | None = None
 
 
 def fees_by_card(transactions: list[Transaction]) -> list[CardFees]:
@@ -319,5 +340,11 @@ def fees_by_card(transactions: list[Transaction]) -> list[CardFees]:
         recent = [t for t in fees if t.date > cutoff]
         span_months = max(1, round(((latest - max(recent[0].date, cutoff)).days) / 30.44) + 1)
         total = round(sum(t.amount for t in recent), 2)
-        out.append(CardFees(card, fees, total, round(total / span_months, 2)))
+        yearly = [t for t in fees if ANNUAL_FEE.search(t.description)]
+        if yearly:
+            last = yearly[-1]
+            out.append(CardFees(card, fees, total, round(total / span_months, 2),
+                                last.amount, _add_year(last.date)))
+        else:
+            out.append(CardFees(card, fees, total, round(total / span_months, 2)))
     return out

@@ -43,6 +43,12 @@ class ParseTests(unittest.TestCase):
         self.assertTrue(all(t.amount > 0 for t in rows))
         self.assertFalse(any("Payment" in t.description for t in rows))
 
+    def test_citi_format(self):
+        rows = read_csv(FIXTURES / "citi_1234_2025.csv")
+        self.assertEqual(rows[0].card, "Citi ••1234")
+        self.assertFalse(any("PAYMENT" in t.description for t in rows))
+        self.assertEqual(sum(t.is_fee for t in rows), 2)
+
     def test_header_after_summary_lines(self):
         rows = read_csv(FIXTURES / "amex-gold-2026.csv")
         self.assertEqual(rows[0].card, "Amex Gold")
@@ -106,7 +112,17 @@ class DetectTests(unittest.TestCase):
             self.assertFalse(any(shop in n for n in names), shop)
 
     def test_single_charge_of_known_service_is_flagged(self):
-        self.assertEqual([p.name for p in self.possible], ["Disney+"])
+        self.assertEqual(sorted(p.name for p in self.possible), ["Airtable", "Disney+"])
+
+    def test_citi_virtual_account_suffix_ignored(self):
+        s = self.by[("Barron's", 15.0)]
+        self.assertEqual(s.frequency, "Monthly")
+        self.assertFalse(s.active)
+
+    def test_annual_card_fee(self):
+        fees = {f.card: f for f in fees_by_card(self.rows)}
+        self.assertEqual(fees["Citi ••1234"].annual_fee, 50.0)
+        self.assertEqual(fees["Citi ••1234"].annual_fee_next, date(2026, 4, 21))
 
     def test_overrides(self):
         subs, _ = find_subscriptions(self.rows, TODAY, {
