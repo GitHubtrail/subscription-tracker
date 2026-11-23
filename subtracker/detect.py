@@ -36,6 +36,7 @@ KNOWN_SERVICES = [
     ("WMT PLUS", "Walmart+"), ("OURARING", "Oura membership"), ("PRIME VIDEO CHANNELS", "Prime Video Channels"),
     ("FOREIGN POLICY", "Foreign Policy magazine"), ("FOREIGN AFFAIRS", "Foreign Affairs magazine"),
     ("TOPSTEP", "TopstepTrader"), ("CLEAR *", "CLEAR"), ("CLEARME", "CLEAR"),
+    ("CORPORATE SUITES", "Corporate Suites Network"),
     ("ASTRA-ADDON", "Astra add-on"), ("CRICUT", "Cricut"), ("ZEE5", "ZEE5"), ("SPLASHTOP", "Splashtop"), ("REMOTEPC", "RemotePC"),
     ("ALLIANCE VIRTUAL", "Alliance Virtual Offices"), ("VOIP.MS", "VoIP.ms"),
     ("KEEPERSECURITY", "Keeper"), ("HOSTGATOR", "HostGator"), ("NAMESILO", "NameSilo"),
