@@ -53,6 +53,19 @@ class ParseTests(unittest.TestCase):
         rows = read_csv(FIXTURES / "amex-gold-2026.csv", card_names={"Amex Gold": "Family Amex"})
         self.assertEqual(rows[0].card, "Family Amex")
 
+    def test_small_monthly_file_sign_from_payments(self):
+        # Bank of America style: charges negative, one payment, few rows.
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "June2026_7777.csv").write_text(
+                "Posted Date,Reference Number,Payee,Address,Amount\n"
+                "06/18/2026,,INTEREST CHARGED ON PURCHASES,,-25.38\n"
+                "06/15/2026,1,ONLINE/MOBILE RECURRING,,56.00\n"
+                "06/06/2026,2,COUNSELING SERVICE,,-35.00\n")
+            rows, _ = read_folder(Path(d))
+        bought = [t for t in rows if not t.is_fee and not t.is_payment]
+        self.assertEqual([(t.description, t.amount) for t in bought], [("COUNSELING SERVICE", 35.0)])
+        self.assertEqual(rows[0].card, "Card ••7777")
+
     def test_header_after_summary_lines(self):
         rows = [t for t in read_csv(FIXTURES / "amex-gold-2026.csv") if not t.is_payment]
         self.assertEqual(rows[0].card, "Amex Gold")
@@ -204,6 +217,16 @@ class DetectTests(unittest.TestCase):
             rows, _ = read_folder(Path(d), card_names={"99999": "Main", "88888": "Extra"})
             self.assertEqual({t.card for t in rows}, {"Main", "Extra"})
 
+
+    def test_bill_paid_from_two_cards(self):
+        from subtracker.parse import Transaction
+        rows = [Transaction(date(2026, 3, 1), "WCI*AURORA", 60.0, "A", "a"),
+                Transaction(date(2026, 6, 1), "WCI*AURORA", 62.0, "B", "b"),
+                Transaction(date(2026, 9, 1), "WCI*AURORA", 61.0, "A", "a")]
+        subs, _ = find_subscriptions(rows, date(2026, 9, 15))
+        self.assertEqual(len(subs), 1)
+        self.assertTrue(subs[0].is_bill)
+        self.assertEqual(subs[0].card, "A + B")
 
     def test_overlaps(self):
         from subtracker.detect import find_overlaps

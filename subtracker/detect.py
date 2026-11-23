@@ -21,6 +21,8 @@ KNOWN_SERVICES = [
     ("GOOGLE *TV", "Google TV"), ("MSBILL", "Microsoft"),
     ("EXTRA SPACE", "Extra Space Storage"), ("PUBLIC STORAGE", "Public Storage"),
     ("CUBESMART", "CubeSmart"), ("LIFE STORAGE", "Life Storage"), ("STORAGE RENTALS", "Storage Rentals"),
+    ("AMAZON GROCERY", "Amazon Grocery subscription"), ("AMAZON DIGI", "Amazon Digital"),
+    ("SHAADI", "Shaadi.com"), ("TELLO", "Tello mobile"), ("VCC COUNSELING", "VCC Counseling"),
     ("ASTRA-ADDON", "Astra add-on"), ("CRICUT", "Cricut"), ("ZEE5", "ZEE5"), ("SPLASHTOP", "Splashtop"), ("REMOTEPC", "RemotePC"),
     ("ALLIANCE VIRTUAL", "Alliance Virtual Offices"), ("VOIP.MS", "VoIP.ms"),
     ("KEEPERSECURITY", "Keeper"), ("HOSTGATOR", "HostGator"), ("NAMESILO", "NameSilo"),
@@ -61,11 +63,14 @@ PREFIXES = re.compile(r"^(D J|SQ|TST|SP|PP|PAYPAL|DD|IN|PY|CKO|FS|BT|BTS|WCI|GOO
 
 # Household bills: amounts vary from bill to bill, so they're matched on
 # timing alone and listed apart from subscriptions.
+# Household bill names that banks shorten in different ways.
+KNOWN_BILLS = [("WCI*", "WCI waste service")]
+
 BILL_CATEGORIES = re.compile(r"utilit|insurance", re.I)
 BILL_NAMES = re.compile(
     r"\b(VILLAGE OF|CITY OF|TOWN OF|COUNTY OF|WATER|SEWER|WASTE|ELECTRIC|ENERGY|POWER|"
     r"GAS CO|COMED|NICOR|PG&E|DUKE ENERGY|XFINITY|COMCAST|SPECTRUM|AT&T|VERIZON|"
-    r"T-MOBILE|TMOBILE|INSURANCE|GEICO|STATE FARM|PROGRESSIVE|ALLSTATE)\b",
+    r"T-MOBILE|TMOBILE|INSURANCE|GEICO|STATE FARM|PROGRESSIVE|ALLSTATE|WCI\*)",
     re.I,
 )
 
@@ -141,6 +146,9 @@ def merchant_name(description: str) -> tuple[str, bool]:
     """Return a grouping name for a charge and whether it is a known service."""
     s = re.sub(r"\s+", " ", description.upper().strip())
     s = re.sub(r"\s*-\s*VIRTUAL ACCOUNT NUMBER.*$", "", s)  # Citi virtual card numbers
+    for needle, name in KNOWN_BILLS:
+        if s.startswith(needle):
+            return name, False
     for needle, name in KNOWN_SERVICES:
         if needle in s + " ":
             return name, True
@@ -262,6 +270,17 @@ def find_subscriptions(
             bills.add((name, t.card))
     as_of = _data_end_by_card(card_files, file_end)
 
+    # A household bill sometimes goes on one card and sometimes another, so
+    # bills are tracked across all cards.
+    for name in {n for n, _ in bills}:
+        keys = [k for k in list(groups) if k[0] == name]
+        if len(keys) > 1:
+            label = " + ".join(sorted(c for _, c in keys))
+            groups[(name, label)] = sorted((t for k in keys for t in groups.pop(k)), key=lambda t: t.date)
+            as_of[label] = max(as_of[c] for _, c in keys)
+            known_names[(name, label)] = False
+            bills.add((name, label))
+
     subs: list[Subscription] = []
     possible: list[Possible] = []
     for (name, card), charges in groups.items():
@@ -272,6 +291,9 @@ def find_subscriptions(
 
         if (name, card) in bills:
             freq = _match_frequency(charges, known=True, forced=False)
+            if not freq and len(charges) >= 3:
+                gap = median((b.date - a.date).days for a, b in zip(charges, charges[1:]))
+                freq = (f"About every {max(1, round(gap / 30.44))} months", gap)
             if freq:
                 subs.append(_make(display, card, charges, freq, as_of[card], today, is_bill=True))
             continue
@@ -288,10 +310,15 @@ def find_subscriptions(
             elif known or forced:
                 # Two accounts with one company bill on different days of the
                 # month at the same price: split them by billing day.
+                split = []
                 for series in _split_by_day(cluster):
                     freq = _match_frequency(series, known, forced=False)
                     if freq and freq[1] >= 28:
-                        found.append(_make(display, card, series, freq, as_of[card], today))
+                        split.append(_make(display, card, series, freq, as_of[card], today))
+                # Only if the series explain nearly every charge; otherwise
+                # it's top-ups or usage at random times.
+                if sum(len(x.charges) for x in split) >= 0.8 * len(cluster):
+                    found.extend(split)
         found = _join_price_changes(found, as_of[card], today)
         found = _fold_odd_months(found, as_of[card], today)
         if not found:

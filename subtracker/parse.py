@@ -42,7 +42,7 @@ DATE_FORMATS = [
 # Rows that are payments to the card, not purchases.
 NOT_PURCHASES = re.compile(
     r"PAYMENT ?- ?THANK ?YOU|PAYMENT THANK YOU|AUTOPAY|ONLINE PA?YMT|ONLINE PAYMENT|"
-    r"PAYMENT RECEIVED|MOBILE PA?YMT|MOBILE PAYMENT|MINIMUM PAYMENT|CASH BACK|"
+    r"PAYMENT RECEIVED|ELECTRONIC PAYMENT|ONLINE/MOBILE RECURRING|MOBILE PA?YMT|MOBILE PAYMENT|MINIMUM PAYMENT|CASH BACK|"
     r"REWARDS? REDEMPTION",
     re.I,
 )
@@ -58,6 +58,11 @@ FEE_CREDITS = re.compile(
     r"(FEE|INTEREST).*REFUND",
     re.I,
 )
+
+MONTHS = {m.lower() for m in (
+    "January February March April May June July August September October November December "
+    "Jan Feb Mar Apr Jun Jul Aug Sep Sept Oct Nov Dec Statement Activity Transactions Export"
+).split()}
 
 # Short names some banks use in their export file names.
 ISSUERS = {
@@ -119,8 +124,9 @@ def card_name_from_file(path: Path) -> str:
     are dropped (the card number is added back from the file's own column)."""
     stem = re.sub(r"(?<!\d)(19|20)\d{2}(?!\d)|(?<!\d)\d{4,6}(?!\d)", " ", path.stem)
     words = [w for w in re.split(r"[\s_\-.]+", stem) if w]
+    words = [w for w in words if w.lower() not in MONTHS]  # "January2026_0470.csv"
     words = [ISSUERS.get(w.lower(), w.capitalize() if w.islower() else w) for w in words]
-    return " ".join(words) or path.stem
+    return " ".join(words) or "Card"
 
 
 def load_formats(path: Path | None) -> dict:
@@ -221,8 +227,17 @@ def read_csv(path: Path, formats: dict | None = None,
     if "amount" in cols:
         flip = spec.get("purchases_are")
         if flip is None:
-            negatives = sum(1 for r in raw if r[2] < 0)
-            flip = "negative" if negatives > len(raw) / 2 else "positive"
+            # Payments and interest show which way round this bank writes
+            # amounts. Small monthly files have too few rows to go by counts.
+            votes = 0
+            for _, desc, a, _, _ in raw:
+                if NOT_PURCHASES.search(desc):
+                    votes += 1 if a > 0 else -1
+                elif FEES.search(desc):
+                    votes += 1 if a < 0 else -1
+            if votes == 0:
+                votes = sum(1 if a < 0 else -1 for _, _, a, _, _ in raw)
+            flip = "negative" if votes > 0 else "positive"
         if flip == "negative":
             raw = [(d, desc, -a, c, cat) for d, desc, a, c, cat in raw]
 
