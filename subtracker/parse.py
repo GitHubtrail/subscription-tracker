@@ -76,6 +76,7 @@ class Transaction:
     source: str
     is_fee: bool = False
     category: str = ""
+    is_payment: bool = False  # a payment to the card or loan (amount shown positive)
 
 
 def _norm(header: str) -> str:
@@ -233,6 +234,8 @@ def read_csv(path: Path, formats: dict | None = None,
             out.append(Transaction(d, desc, round(a, 2), c, path.name, True, cat))
         elif a > 0 and not NOT_PURCHASES.search(desc):
             out.append(Transaction(d, desc, round(a, 2), c, path.name, False, cat))
+        elif a < 0 and NOT_PURCHASES.search(desc):
+            out.append(Transaction(d, desc, round(-a, 2), c, path.name, False, cat, is_payment=True))
     return out
 
 

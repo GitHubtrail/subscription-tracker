@@ -28,7 +28,7 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(card_name_from_file(Path("capitalone_1234_2026.csv")), "Capital One")
 
     def test_capital_one_debit_credit_columns(self):
-        rows = read_csv(FIXTURES / "capital-one-2025.csv")
+        rows = [t for t in read_csv(FIXTURES / "capital-one-2025.csv") if not t.is_payment]
         self.assertTrue(rows)
         self.assertTrue(all(t.amount > 0 for t in rows))
         self.assertEqual(rows[0].card, "Capital One ••4821")
@@ -39,12 +39,12 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(rows[0].card, "Family card")
 
     def test_negative_purchases_are_flipped(self):
-        rows = read_csv(FIXTURES / "chase-freedom.csv")
+        rows = [t for t in read_csv(FIXTURES / "chase-freedom.csv") if not t.is_payment]
         self.assertTrue(all(t.amount > 0 for t in rows))
         self.assertFalse(any("Payment" in t.description for t in rows))
 
     def test_citi_format(self):
-        rows = read_csv(FIXTURES / "citi_1234_2025.csv")
+        rows = [t for t in read_csv(FIXTURES / "citi_1234_2025.csv") if not t.is_payment]
         self.assertEqual(rows[0].card, "Citi ••1234")
         self.assertFalse(any("PAYMENT" in t.description for t in rows))
         self.assertEqual(sum(t.is_fee for t in rows), 2)
@@ -54,7 +54,7 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(rows[0].card, "Family Amex")
 
     def test_header_after_summary_lines(self):
-        rows = read_csv(FIXTURES / "amex-gold-2026.csv")
+        rows = [t for t in read_csv(FIXTURES / "amex-gold-2026.csv") if not t.is_payment]
         self.assertEqual(rows[0].card, "Amex Gold")
         self.assertFalse(any("AUTOPAY" in t.description for t in rows))
 
@@ -216,6 +216,21 @@ class DetectTests(unittest.TestCase):
 
 
 class FeeAndReportTests(unittest.TestCase):
+    def test_loan_section(self):
+        from subtracker.detect import find_loans
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "amex_55555_1.csv").write_text(
+                "Date,Description,Amount\n"
+                "10/28/2026,Interest Charge,156.01\n10/12/2026,AUTOPAY PAYMENT - THANK YOU,-476.04\n"
+                "09/27/2026,Interest Charge,160.22\n09/12/2026,AUTOPAY PAYMENT - THANK YOU,-476.04\n")
+            rows, _ = read_folder(Path(d), card_names={"55555": "Car Loan"})
+        loans = find_loans(rows, TODAY)
+        self.assertEqual(loans[0].payment, 476.04)
+        self.assertEqual(loans[0].next_payment, date(2026, 12, 12))
+        self.assertEqual(loans[0].interest_per_month, 158.12)
+        self.assertEqual(fees_by_card(rows), [])
+        self.assertEqual(find_subscriptions(rows, TODAY), ([], []))
+
     def test_fees_kept_apart(self):
         from subtracker.parse import Transaction
         rows = [

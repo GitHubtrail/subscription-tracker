@@ -7,7 +7,7 @@ import html
 from datetime import date
 from pathlib import Path
 
-from .detect import CardFees, Possible, Subscription
+from .detect import CardFees, Loan, Possible, Subscription
 
 
 def _money(x: float) -> str:
@@ -24,7 +24,8 @@ def totals(subs: list[Subscription]) -> tuple[float, float]:
 
 
 def text_report(subs: list[Subscription], possible: list[Possible], problems: list[str],
-                fees: list[CardFees] | None = None, overlaps: list[str] | None = None) -> str:
+                fees: list[CardFees] | None = None, overlaps: list[str] | None = None,
+                loans: list[Loan] | None = None) -> str:
     lines = []
     for p in problems:
         lines.append(f"! {p}")
@@ -67,6 +68,13 @@ def text_report(subs: list[Subscription], possible: list[Possible], problems: li
             lines.append(row.format(s.name[:28], _money(s.average), s.frequency, s.card[:36], _d(s.next_renewal)))
         monthly, yearly = totals(bills)
         lines.append(f"\nBills total: about {_money(monthly)} a month, {_money(yearly)} a year\n")
+    if loans:
+        lines.append("LOANS (not counted in the totals above)")
+        for l in loans:
+            pay = (f"{_money(l.payment)} a month, last paid {_d(l.last_paid)}, next around {_d(l.next_payment)}"
+                   if l.payment else "no payments in these files")
+            lines.append(f"  {l.card}: {pay}; interest about {_money(l.interest_per_month)} a month")
+        lines.append("")
     if fees:
         lines.append("INTEREST AND FEES (not counted in the totals above)")
         for f in fees:
@@ -93,7 +101,7 @@ def write_csv(subs: list[Subscription], path: Path) -> None:
 
 
 def html_report(subs, possible, problems, today: date, fees: list[CardFees] | None = None,
-                overlaps: list[str] | None = None) -> str:
+                overlaps: list[str] | None = None, loans: list[Loan] | None = None) -> str:
     e = html.escape
     bills = [s for s in subs if s.is_bill and s.active]
     subs = [s for s in subs if not s.is_bill]
@@ -145,6 +153,16 @@ def html_report(subs, possible, problems, today: date, fees: list[CardFees] | No
         + "".join(f"<li>{_d(t.date)} · {e(t.description)} · {_money(t.amount)}</li>" for t in reversed(f.charges))
         + "</ul></details></td></tr>"
         for f in (fees or [])
+    )
+    loan_rows = "".join(
+        f"<tr><td class='name'>{e(l.card)}</td>"
+        f"<td class='num'>{_money(l.payment) if l.payment else '–'}</td>"
+        f"<td class='date'>{_d(l.next_payment) if l.next_payment else '–'}</td>"
+        f"<td class='num'>{_money(l.interest_per_month)}</td>"
+        f"<td><details><summary>{len(l.charges)} entries</summary><ul>"
+        + "".join(f"<li>{_d(t.date)} · {e(t.description)} · {_money(t.amount)}</li>" for t in reversed(l.charges))
+        + "</ul></details></td></tr>"
+        for l in (loans or [])
     )
     overlap_html = (
         "<h2>Possible overlaps</h2><p class='note'>Worth checking whether you need all of these.</p><ul class='overlaps'>"
@@ -209,6 +227,8 @@ details summary {{ cursor:pointer; color:var(--accent); }} details ul {{ margin:
 {section(f"Bills and utilities · about {_money(bill_monthly)} a month",
          "Regular household bills. The amount changes each time, so this shows the recent average. Not counted in the subscription totals.",
          ["Name", "Average", "Billed", "Card", "Next bill (estimate)", "Per month", "History"], bill_rows)}
+{section("Loans", "Monthly loan payments and the interest in them. Not counted in the subscription totals.",
+         ["Loan", "Monthly payment", "Next payment (estimate)", "Interest per month", "History"], loan_rows)}
 {section("Interest and fees", "Charged by the card itself. Not counted in the subscription totals.",
          ["Card", "Last 12 months", "Per month", "Charges"], fee_rows)}
 </main></body></html>

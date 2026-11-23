@@ -251,7 +251,7 @@ def find_subscriptions(
     for t in transactions:
         file_end[t.source] = max(file_end.get(t.source, t.date), t.date)
         card_files[t.card].add(t.source)
-        if t.is_fee:
+        if t.is_fee or t.is_payment or is_loan(t.card):
             continue
         name, known = merchant_name(t.description)
         if listed(name, t.description, ignore):
@@ -427,6 +427,49 @@ def _money(x: float) -> str:
     return f"${x:,.2f}"
 
 
+def is_loan(card: str) -> bool:
+    """Loan accounts are named with the word "loan" in overrides.json."""
+    return bool(re.search(r"\bloans?\b", card, re.I))
+
+
+@dataclass
+class Loan:
+    card: str
+    payment: float | None
+    last_paid: date | None
+    next_payment: date | None
+    interest_per_month: float
+    charges: list[Transaction]
+
+
+def find_loans(transactions: list[Transaction], today: date | None = None) -> list[Loan]:
+    today = today or date.today()
+    by_card: dict[str, list[Transaction]] = defaultdict(list)
+    for t in transactions:
+        if is_loan(t.card):
+            by_card[t.card].append(t)
+    loans = []
+    for card, rows in sorted(by_card.items()):
+        rows.sort(key=lambda t: t.date)
+        payments = [t for t in rows if t.is_payment]
+        interest = [t for t in rows if t.is_fee]
+        last = payments[-1] if payments else None
+        nxt = None
+        if last:
+            nxt = last.date
+            while nxt <= today:
+                month = nxt.month % 12 + 1
+                year = nxt.year + (nxt.month == 12)
+                try:
+                    nxt = nxt.replace(year=year, month=month)
+                except ValueError:
+                    nxt = nxt.replace(year=year, month=month, day=28)
+        recent = interest[-3:]
+        avg = round(sum(t.amount for t in recent) / len(recent), 2) if recent else 0.0
+        loans.append(Loan(card, last.amount if last else None, last.date if last else None, nxt, avg, rows))
+    return loans
+
+
 ANNUAL_FEE = re.compile(r"ANNUAL FEE|MEMBERSHIP FEE", re.I)
 
 
@@ -453,7 +496,7 @@ def fees_by_card(transactions: list[Transaction]) -> list[CardFees]:
     out = []
     by_card: dict[str, list[Transaction]] = defaultdict(list)
     for t in transactions:
-        if t.is_fee:
+        if t.is_fee and not is_loan(t.card):
             by_card[t.card].append(t)
     for card, fees in sorted(by_card.items()):
         fees.sort(key=lambda t: t.date)

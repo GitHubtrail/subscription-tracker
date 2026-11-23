@@ -14,7 +14,7 @@ import webbrowser
 from datetime import date
 from pathlib import Path
 
-from subtracker.detect import fees_by_card, find_overlaps, find_subscriptions
+from subtracker.detect import fees_by_card, find_loans, find_overlaps, find_subscriptions
 from subtracker.parse import load_formats, read_folder
 from subtracker.report import html_report, text_report, write_csv
 
@@ -33,12 +33,13 @@ def build(data: Path, out: Path, today: date | None = None, quiet: bool = False)
     subs, possible = find_subscriptions(transactions, today, overrides)
     fees = fees_by_card(transactions)
     overlaps = find_overlaps(subs, possible)
+    loans = find_loans(transactions, today)
 
     out.mkdir(parents=True, exist_ok=True)
-    (out / "report.html").write_text(html_report(subs, possible, problems, today, fees, overlaps))
+    (out / "report.html").write_text(html_report(subs, possible, problems, today, fees, overlaps, loans))
     write_csv(subs, out / "report.csv")
     if not quiet:
-        print(text_report(subs, possible, problems, fees, overlaps))
+        print(text_report(subs, possible, problems, fees, overlaps, loans))
         print(f"\nSaved {out / 'report.html'} and {out / 'report.csv'}")
 
 

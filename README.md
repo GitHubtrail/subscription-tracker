@@ -36,6 +36,8 @@ Your CSV files, `report.html`, `report.csv` and `overrides.json` are listed in
 
 - **Active**: subscriptions still charging on schedule, with the next renewal
   date and the cost per month. The totals at the top add up only these.
+- **Possible overlaps**: a service charged more than one way, or several
+  services that do the same job (two fax services, two storage units).
 - **Stopped or expired**: things that used to charge regularly but missed
   their latest charge, with the date of the last one.
 - **Check these**: well-known services charged only once so far, with the
@@ -43,6 +45,8 @@ Your CSV files, `report.html`, `report.csv` and `overrides.json` are listed in
 - **Bills and utilities**: water, trash and similar bills whose amount changes
   each time. Shown with the recent average and kept out of the subscription
   totals.
+- **Loans**: accounts whose name in `overrides.json` contains "loan", with
+  the monthly payment, next payment and interest. Kept out of the totals.
 - **Interest and fees**: interest and card fees per card over the latest 12
   months.
 
