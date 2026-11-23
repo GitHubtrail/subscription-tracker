@@ -366,6 +366,7 @@ class FeeAndReportTests(unittest.TestCase):
         self.assertIn("download='subscriptions-active-2026-11-23.csv'", page)
         self.assertIn("download='subscriptions-check-these-2026-11-23.csv'", page)
         self.assertIn("$65.00 in latest charges", page)
+        self.assertIn('th.classList.add("sortable")', page)
 
 
 class DownloadNameTests(unittest.TestCase):

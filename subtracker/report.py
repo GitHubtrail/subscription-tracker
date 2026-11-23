@@ -160,6 +160,47 @@ def write_csv(subs: list[Subscription], path: Path, possible: list[Possible] | N
     path.write_text(csv_text(subs, possible), encoding="utf-8-sig", newline="")
 
 
+# Click a column heading to sort that table; click again to reverse. Plain
+# JavaScript in the page, so it works from the saved file with no internet.
+SORT_JS = """<script>
+(function () {
+  var DATE = /[A-Z][a-z]{2} \\d{1,2}, \\d{4}/;
+  function key(td) {
+    var text = (td.innerText || td.textContent).trim().split("\\n")[0].trim();
+    var money = text.match(/^\\$-?[\\d,]+(\\.\\d+)?/);
+    if (money) return [0, parseFloat(money[0].replace(/[$,]/g, ""))];
+    var d = text.match(DATE);
+    if (d && !isNaN(Date.parse(d[0]))) return [0, Date.parse(d[0])];
+    var n = text.match(/^(\\d+) charges?/);
+    if (n) return [0, parseInt(n[1], 10)];
+    if (!text || text === "\\u2013") return [2, ""];
+    return [1, text.toLowerCase()];
+  }
+  document.querySelectorAll("table").forEach(function (table) {
+    var heads = table.querySelectorAll("thead th");
+    heads.forEach(function (th, col) {
+      th.classList.add("sortable");
+      th.setAttribute("title", "Sort");
+      th.addEventListener("click", function () {
+        var up = th.getAttribute("aria-sort") !== "ascending";
+        heads.forEach(function (h) { h.removeAttribute("aria-sort"); });
+        th.setAttribute("aria-sort", up ? "ascending" : "descending");
+        var body = table.tBodies[0];
+        var rows = Array.prototype.slice.call(body.rows);
+        rows.sort(function (a, b) {
+          var x = key(a.cells[col]), y = key(b.cells[col]);
+          if (x[0] !== y[0]) return x[0] - y[0];  // blanks always last
+          var c = x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0;
+          return up ? c : -c;
+        });
+        rows.forEach(function (r) { body.appendChild(r); });
+      });
+    });
+  });
+})();
+</script>"""
+
+
 def html_report(subs, possible, problems, today: date, fees: list[CardFees] | None = None,
                 overlaps: list[str] | None = None, loans: list[Loan] | None = None,
                 moves: list[str] | None = None) -> str:
@@ -290,6 +331,10 @@ h1 {{ margin:0 0 4px; font-size:26px; }} h2 {{ margin:36px 0 4px; font-size:18px
 .note, .sub {{ color:var(--muted); margin:0 0 12px; }}
 .top {{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }}
 .download {{ background:var(--accent); color:var(--card); text-decoration:none; font-weight:600; font-size:14px; padding:9px 16px; border-radius:8px; white-space:nowrap; }}
+.sortable {{ cursor:pointer; user-select:none; }} .sortable:hover {{ color:var(--text); }}
+th.sortable::after {{ content:'\\2195'; opacity:.35; margin-left:4px; }}
+th[aria-sort=ascending]::after {{ content:'\\25B2'; opacity:1; color:var(--accent); }}
+th[aria-sort=descending]::after {{ content:'\\25BC'; opacity:1; color:var(--accent); }}
 .download.small {{ font-size:13px; padding:6px 12px; }}
 .section-head {{ display:flex; align-items:flex-end; justify-content:space-between; gap:12px; flex-wrap:wrap; margin:36px 0 4px; }}
 .section-head h2 {{ margin:0; }}
@@ -356,5 +401,5 @@ details summary {{ cursor:pointer; color:var(--accent); white-space:nowrap; }} d
          ["Loan", "Monthly payment", "Next payment (estimate)", "Interest per month", "History"], loan_rows)}
 {section("Interest and fees", "Charged by the card itself. Not counted in the subscription totals.",
          ["Card", "Last 12 months", "Per month", "Charges"], fee_rows)}
-</main></body></html>
+</main>{SORT_JS}</body></html>
 """
