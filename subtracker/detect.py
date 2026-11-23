@@ -23,6 +23,7 @@ KNOWN_SERVICES = [
     ("CUBESMART", "CubeSmart"), ("LIFE STORAGE", "Life Storage"), ("STORAGE RENTALS", "Storage Rentals"),
     ("AMAZON GROCERY", "Amazon Grocery subscription"), ("AMAZON DIGI", "Amazon Digital"),
     ("SHAADI", "Shaadi.com"), ("TELLO", "Tello mobile"), ("VCC COUNSELING", "VCC Counseling"),
+    ("FAMILY HANDYMAN", "Family Handyman magazine"),
     ("ASTRA-ADDON", "Astra add-on"), ("CRICUT", "Cricut"), ("ZEE5", "ZEE5"), ("SPLASHTOP", "Splashtop"), ("REMOTEPC", "RemotePC"),
     ("ALLIANCE VIRTUAL", "Alliance Virtual Offices"), ("VOIP.MS", "VoIP.ms"),
     ("KEEPERSECURITY", "Keeper"), ("HOSTGATOR", "HostGator"), ("NAMESILO", "NameSilo"),
@@ -421,7 +422,7 @@ def _join_price_changes(found: list[Subscription], as_of: date, today: date) -> 
 # Services that do the same job. Paying for two from one group is worth a look.
 OVERLAP_GROUPS = {
     "fax service": {"Fax.com", "HumbleFax", "eFax"},
-    "YouTube or Google TV plan": {"YouTube TV", "YouTube Premium", "Google TV"},
+    "TV streaming plan": {"YouTube TV", "YouTube Premium", "Google TV", "Hulu", "Sling TV", "Fubo"},
     "remote desktop tool": {"Splashtop", "RemotePC"},
     "cloud storage plan": {"Dropbox", "Google One", "iCloud"},
     "storage unit": {"Extra Space Storage", "Public Storage", "CubeSmart", "Life Storage",

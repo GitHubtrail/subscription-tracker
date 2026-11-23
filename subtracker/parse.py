@@ -31,7 +31,7 @@ COLUMN_ALIASES = {
     "debit": ["debit", "debits", "withdrawal", "withdrawals", "charge", "charges"],
     "credit": ["credit", "credits", "deposit", "deposits", "payment"],
     "category": ["category", "transaction category"],
-    "card": ["card no.", "card number", "card", "account number", "account #", "account no.", "card member"],
+    "card": ["card no.", "card number", "card last 4 digits", "card last four digits", "card", "account number", "account #", "account no.", "card member"],
 }
 
 DATE_FORMATS = [

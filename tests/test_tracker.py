@@ -66,6 +66,19 @@ class ParseTests(unittest.TestCase):
         self.assertEqual([(t.description, t.amount) for t in bought], [("COUNSELING SERVICE", 35.0)])
         self.assertEqual(rows[0].card, "Card ••7777")
 
+    def test_barclays_format(self):
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "barclays_9999_1.csv").write_text(
+                "Barclays\nAccount Number: XXXXXXXXXXXX9999\nAccount Balance as of November 22 2026:    $1.00\n \n"
+                "Transaction Date,Description,Category,Amount,Card Last 4 Digits,Purchased by\n"
+                '11/19/2026,"STARZ ENTERTAINMENT","DEBIT","-11.99",="1234",ALEX\n'
+                '11/10/2026,"INTEREST CHARGE-PURCHASES","DEBIT","-6.11",="9999",ALEX\n'
+                '11/02/2026,"PAYMENT RECEIVED","CREDIT","50.00",="9999",ALEX\n')
+            rows, _ = read_folder(Path(d), card_names={"1234": "Barclays", "9999": "Barclays"})
+        self.assertEqual({t.card for t in rows}, {"Barclays"})
+        starz = [t for t in rows if "STARZ" in t.description][0]
+        self.assertEqual(starz.amount, 11.99)
+
     def test_header_after_summary_lines(self):
         rows = [t for t in read_csv(FIXTURES / "amex-gold-2026.csv") if not t.is_payment]
         self.assertEqual(rows[0].card, "Amex Gold")
