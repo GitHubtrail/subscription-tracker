@@ -169,6 +169,7 @@ class Possible:
     charged: date
     times: int = 1
     overdue: bool = False  # a yearly renewal should have shown up by now
+    moved_to: tuple[str, date, float] | None = None  # renewed on another card instead
 
     @property
     def renews_if_yearly(self) -> date:
@@ -278,6 +279,8 @@ def find_subscriptions(
     ignore = [s.lower() for s in overrides.get("ignore", [])]
     include = [s.lower() for s in overrides.get("include", [])]
     rename = {k.lower(): v for k, v in overrides.get("rename", {}).items()}
+    # "same_as": charges under one name that belong to another service.
+    aliases = {k.lower(): v for k, v in overrides.get("same_as", {}).items()}
 
     def listed(name, desc, patterns):
         return any(p in name.lower() or p in desc.lower() for p in patterns)
@@ -297,6 +300,8 @@ def find_subscriptions(
         if t.is_fee or t.is_payment or is_loan(t.card) or GOV_FEES.search(t.description):
             continue
         name, known = merchant_name(t.description)
+        if name.lower() in aliases:
+            name, known = aliases[name.lower()], True
         if listed(name, t.description, ignore):
             continue
         groups[(name, t.card)].append(t)
@@ -391,7 +396,16 @@ def find_subscriptions(
         elif known:
             t = charges[-1]
             overdue = (as_of[card] - t.date).days > 365 + 14
-            possible.append(Possible(display, card, t.amount, t.date, len(charges), overdue))
+            # Renewed on a different card about a year later?
+            moved_to = None
+            renewals = [r for (n, c), rows in groups.items() if n == name and c != card
+                        for r in rows if 120 <= (r.date - t.date).days <= 430
+                        and max(r.amount, t.amount) <= 1.5 * min(r.amount, t.amount)]
+            if renewals:
+                r = min(renewals, key=lambda r: abs((r.date - t.date).days - 365))
+                moved_to = (r.card, r.date, r.amount)
+                overdue = False
+            possible.append(Possible(display, card, t.amount, t.date, len(charges), overdue, moved_to))
 
     plans = [p.lower() for p in overrides.get("payment_plans", [])]
     for sub in subs:
@@ -556,6 +570,11 @@ def find_moves(subs: list[Subscription], possible: list[Possible]) -> list[str]:
             if name == s.name and card != s.card and s.first_charged >= last - timedelta(days=7):
                 notes.append(f"{name} moved from {card} to {s.card} "
                              f"(last on the old card {_d(last)}, first on the new one {_d(s.first_charged)}).")
+    for p in possible:
+        if p.moved_to:
+            new_card, when, amount = p.moved_to
+            notes.append(f"{p.name} renewed on {new_card} instead of {p.card} "
+                         f"({_money(p.amount)} on {_d(p.charged)}, then {_money(amount)} on {_d(when)}).")
     return notes
 
 

@@ -79,6 +79,8 @@ Copy `overrides.example.json` to `overrides.json` and edit it:
 - `payment_plans`: instalments toward a bill (a lawyer, a doctor) that should
   be listed as payment plans rather than subscriptions. Orthodontist,
   dental, hospital and similar names are recognised already.
+- `same_as`: charges that belong to another service under a different
+  name, for example `{ "Usps Po": "USPS PO Box" }`.
 - `rename`: nicer names. The left side is matched against the name shown in
   the report.
 

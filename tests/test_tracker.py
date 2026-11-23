@@ -262,6 +262,17 @@ class DetectTests(unittest.TestCase):
         self.assertEqual(len(plans), 2)
         self.assertAlmostEqual(totals([s for s in subs if not s.is_plan])[0], 15.49, places=1)
 
+    def test_yearly_renewal_on_another_card(self):
+        from subtracker.detect import find_moves
+        from subtracker.parse import Transaction
+        rows = [Transaction(date(2025, 10, 7), "AICPA  *INSURANCE TRST", 4968.0, "Old", "a"),
+                Transaction(date(2026, 11, 1), "GROCERY", 20.0, "Old", "a"),
+                Transaction(date(2026, 10, 6), "AICPA  *INSURANCE TRST", 5352.0, "New", "b")]
+        subs, possible = find_subscriptions(rows, TODAY)
+        old = [p for p in possible if p.card == "Old"][0]
+        self.assertFalse(old.overdue)
+        self.assertIn("renewed on New instead of Old", find_moves(subs, possible)[0])
+
     def test_overlaps(self):
         from subtracker.detect import find_overlaps
         rows = self._monthly("Fax.com (888)429-4615 CA", 11.99, 10, range(1, 11)) + \

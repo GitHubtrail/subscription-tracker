@@ -64,7 +64,8 @@ def text_report(subs: list[Subscription], possible: list[Possible], problems: li
         for p in possible:
             times = f", {p.times} charges, latest" if p.times > 1 else ""
             lines.append(f"  {p.name} {_money(p.amount)} on {p.card}{times}, {_d(p.charged)} "
-                         + ("(charged at uneven times)" if p.times >= 3
+                         + (f"(renewed on {p.moved_to[0]} on {_d(p.moved_to[1])})" if p.moved_to
+                            else "(charged at uneven times)" if p.times >= 3
                             else f"(yearly renewal was due {_d(p.renews_if_yearly)}, no charge seen)" if p.overdue
                             else f"(if yearly, renews around {_d(p.renews_if_yearly)})"))
         lines.append("")
@@ -152,7 +153,8 @@ def html_report(subs, possible, problems, today: date, fees: list[CardFees] | No
     possible_rows = "".join(
         f"<tr><td class='name'>{e(p.name)}</td><td class='num'>{_money(p.amount)}</td>"
         f"<td>{e(p.card)}</td><td class='date'>{_d(p.charged)}</td>"
-        + (f"<td>Uneven timing ({p.times} charges)</td></tr>" if p.times >= 3
+        + (f"<td>Renewed on {e(p.moved_to[0])}, {_d(p.moved_to[1])}</td></tr>" if p.moved_to
+           else f"<td>Uneven timing ({p.times} charges)</td></tr>" if p.times >= 3
            else f"<td class='date soon'>Was due {_d(p.renews_if_yearly)}, no charge seen</td></tr>" if p.overdue
            else f"<td class='date'>{_d(p.renews_if_yearly)}</td></tr>")
         for p in possible
