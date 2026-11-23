@@ -25,7 +25,10 @@ KNOWN_SERVICES = [
     ("SHAADI", "Shaadi.com"), ("TELLO", "Tello mobile"), ("VCC COUNSELING", "VCC Counseling"),
     ("FAMILY HANDYMAN", "Family Handyman magazine"),
     ("BUFFALOGROVEORTHO", "Buffalo Grove Ortho"),
-    ("MY CHART", "Northwestern MyChart"), ("UAL*WIFI", "United in-flight Wi-Fi"),
+    ("MY CHART", "Northwestern MyChart"),
+    ("TRADINGVIEW", "TradingView"), ("FINVIZ", "Finviz"), ("CNBC SUBSCRIPTION", "CNBC"), ("CNBC PRO", "CNBC"),
+    ("PICTORY", "Pictory"), ("WAVE.CO AI NOTE", "Wave AI note taker"), ("BLINK ", "Blink"),
+    ("ELEMENTOR", "Elementor"), ("LEARNDASH", "LearnDash"), ("TAXDOME", "TaxDome"),
     ("ACCOUNTANTSWORLD", "AccountantsWorld"), ("AICPA", "AICPA insurance"),
     ("USPS PO BOX", "USPS PO Box"),
     ("INTUIT", "Intuit QuickBooks"), ("QUICKBOOKS", "Intuit QuickBooks"),
@@ -86,6 +89,16 @@ PAYMENT_PLAN = re.compile(
 )
 
 # Government filing and licence fees: required, irregular, not subscriptions.
+# Trips, not plans: in-flight Wi-Fi, airfare and hotels can repeat at the
+# same price without being a subscription.
+TRAVEL = re.compile(
+    r"UAL\*WIFI|\bWI-?FI ONBOARD|GOGOAIR|GOGO AIR|INFLIGHT|IN-FLIGHT|VIASAT|AA WIFI|DELTA WIFI|"
+    r"^UNITED \d|^UNITED AIRLINES|AMERICAN AIR|^DELTA AIR|SOUTHWEST AIR|ALASKA AIR|SPIRIT AIRL|"
+    r"FRONTIER AIRL|JETBLUE|EMIRATES AIR|AIR INDIA|LUFTHANSA|BRITISH AIRWAYS|"
+    r"HILTON HOTEL|HAMPTON INN|HOLIDAY INN|MARRIOTT|HYATT|AIRBNB|EXPEDIA|BOOKING\.COM|HOTELS\.COM",
+    re.I,
+)
+
 GOV_FEES = re.compile(
     r"SECRETARY OF STATE|SEC OF STATE|\bSOS\b|S\.O\.S\.|ILSOS|LICENSE FEE|LICENCE FEE|\bDMV\b|VEH RENEWAL",
     re.I,
@@ -170,6 +183,7 @@ class Possible:
     times: int = 1
     overdue: bool = False  # a yearly renewal should have shown up by now
     moved_to: tuple[str, date, float] | None = None  # renewed on another card instead
+    likely_yearly: bool = False  # one charge about a year ago, renewal due soon
 
     @property
     def renews_if_yearly(self) -> date:
@@ -222,9 +236,10 @@ def _match_frequency(charges: list[Transaction], known: bool, forced: bool):
     for name, days, (lo, hi), min_count in FREQUENCIES:
         if not lo <= typical <= hi:
             continue
-        needed = 2 if (known or forced) and days >= 28 else min_count
-        if len(charges) == 2 and len({t.amount for t in charges}) == 1 and days <= 31:
-            needed = 2
+        # Two charges are enough only for a yearly plan of a well-known
+        # service. Anything billed every 6 months or more often needs three,
+        # so two same-price purchases months apart don't count.
+        needed = 2 if forced or (known and days >= 340) else max(min_count, 3)
         if len(charges) < needed:
             return None
         # A skipped month (gap of two periods) is fine; random gaps are not.
@@ -298,6 +313,8 @@ def find_subscriptions(
         file_end[t.source] = max(file_end.get(t.source, t.date), t.date)
         card_files[t.card].add(t.source)
         if t.is_fee or t.is_payment or is_loan(t.card) or GOV_FEES.search(t.description):
+            continue
+        if TRAVEL.search(t.description) and not listed(t.description, t.description, include):
             continue
         name, known = merchant_name(t.description)
         if name.lower() in aliases:
@@ -405,7 +422,11 @@ def find_subscriptions(
                 r = min(renewals, key=lambda r: abs((r.date - t.date).days - 365))
                 moved_to = (r.card, r.date, r.amount)
                 overdue = False
-            possible.append(Possible(display, card, t.amount, t.date, len(charges), overdue, moved_to))
+            # One charge about a year old from a well-known service: most
+            # likely a yearly plan that is about to renew.
+            likely = (len(charges) == 1 and not overdue and not moved_to
+                      and (as_of[card] - t.date).days >= 300)
+            possible.append(Possible(display, card, t.amount, t.date, len(charges), overdue, moved_to, likely))
 
     plans = [p.lower() for p in overrides.get("payment_plans", [])]
     for sub in subs:

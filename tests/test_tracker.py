@@ -4,7 +4,7 @@ from datetime import date
 from pathlib import Path
 
 from subtracker.detect import fees_by_card, find_subscriptions, merchant_name, stale_cards
-from subtracker.parse import card_name_from_file, parse_amount, read_csv, read_folder
+from subtracker.parse import Transaction, card_name_from_file, parse_amount, read_csv, read_folder
 from subtracker.report import html_report, text_report
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -281,6 +281,27 @@ class DetectTests(unittest.TestCase):
         notes = find_overlaps(subs, possible)
         self.assertEqual(len(notes), 1)
         self.assertIn("Fax.com, HumbleFax", notes[0])
+
+    def test_inflight_wifi_is_not_a_subscription(self):
+        rows = [Transaction(d, "UAL*WIFI 800-555-0100 IL", 69.0, "Card", "x")
+                for d in (date(2025, 6, 2), date(2025, 12, 1), date(2026, 6, 1))]
+        subs, possible = find_subscriptions(rows, TODAY)
+        self.assertEqual((subs, possible), ([], []))
+
+    def test_two_charges_six_months_apart_are_not_enough(self):
+        rows = [Transaction(date(2026, 1, 10), "NETFLIX.COM", 69.0, "Card", "x"),
+                Transaction(date(2026, 7, 10), "NETFLIX.COM", 69.0, "Card", "x")]
+        subs, _ = find_subscriptions(rows, TODAY)
+        self.assertEqual(subs, [])
+
+    def test_single_charge_a_year_ago_is_likely_yearly(self):
+        rows = [Transaction(date(2025, 11, 29), "TradingViewV*Product", 576.0, "Card", "x"),
+                Transaction(date(2026, 11, 20), "COFFEE SHOP", 4.0, "Card", "x")]
+        _, possible = find_subscriptions(rows, TODAY)
+        self.assertEqual([(p.name, p.likely_yearly) for p in possible], [("TradingView", True)])
+        page = html_report([], possible, [], TODAY)
+        self.assertIn("Likely yearly, renewing soon", page)
+        self.assertIn("$576.00 a year", page)
 
 
 class FeeAndReportTests(unittest.TestCase):

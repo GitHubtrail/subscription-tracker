@@ -61,6 +61,16 @@ def text_report(subs: list[Subscription], possible: list[Possible], problems: li
         lines.append("POSSIBLE OVERLAPS")
         lines.extend(f"  - {n}" for n in overlaps)
         lines.append("")
+    likely = [p for p in possible if p.likely_yearly]
+    possible = [p for p in possible if not p.likely_yearly]
+    if likely:
+        total = sum(p.amount for p in likely)
+        lines.append(f"LIKELY YEARLY, RENEWING SOON (one charge about a year ago; "
+                     f"{_money(total)} a year, about {_money(total / 12)} a month; not in the totals above)")
+        for p in likely:
+            lines.append(f"  {p.name} {_money(p.amount)} on {p.card}, last {_d(p.charged)}, "
+                         f"renews around {_d(p.renews_if_yearly)}")
+        lines.append("")
     if possible:
         lines.append("CHECK THESE (known services with no clear billing pattern yet)")
         for p in possible:
@@ -123,10 +133,13 @@ def csv_rows(subs: list[Subscription], possible: list[Possible] | None = None) -
         ])
     for p in possible or []:
         status = (f"Renewed on {p.moved_to[0]}" if p.moved_to else
+                  "Likely yearly" if p.likely_yearly else
                   "Check these (renewal missed)" if p.overdue else "Check these")
         rows.append([
-            p.name, "Subscription", status, f"{p.amount:.2f}", "Not clear yet", p.card, "",
-            p.charged.isoformat(), "" if p.moved_to or p.times >= 3 else p.renews_if_yearly.isoformat(), "", "",
+            p.name, "Subscription", status, f"{p.amount:.2f}", "Yearly (likely)" if p.likely_yearly else "Not clear yet",
+            p.card, "", p.charged.isoformat(),
+            "" if p.moved_to or p.times >= 3 else p.renews_if_yearly.isoformat(),
+            f"{p.amount / 12:.2f}" if p.likely_yearly else "", f"{p.amount:.2f}" if p.likely_yearly else "",
         ])
     return rows
 
@@ -184,6 +197,16 @@ def html_report(subs, possible, problems, today: date, fees: list[CardFees] | No
         f"<td>{e(s.frequency)}</td><td>{e(s.card)}</td><td class='date'>{_d(s.last_charged)}</td>"
         f"<td>{history(s)}</td></tr>"
         for s in stopped
+    )
+    likely = [p for p in possible if p.likely_yearly]
+    possible = [p for p in possible if not p.likely_yearly]
+    likely_total = sum(p.amount for p in likely)
+    likely_rows = "".join(
+        f"<tr><td class='name'>{e(p.name)}</td><td class='num'>{_money(p.amount)}</td>"
+        f"<td>{e(p.card)}</td><td class='date'>{_d(p.charged)}</td>"
+        f"<td class='date{' soon' if (p.renews_if_yearly - today).days <= 7 else ''}'>{_d(p.renews_if_yearly)}</td>"
+        f"<td class='num'>{_money(p.amount / 12)}</td></tr>"
+        for p in sorted(likely, key=lambda p: p.charged)
     )
     possible_rows = "".join(
         f"<tr><td class='name'>{e(p.name)}</td><td class='num'>{_money(p.amount)}</td>"
@@ -308,6 +331,10 @@ details summary {{ cursor:pointer; color:var(--accent); white-space:nowrap; }} d
          ["Name", "Amount", "Billed", "Card", "Next renewal", "Per month", "History"], active_rows,
          f"{_money(monthly)} a month · {_money(yearly)} a year", ("active", active, None))
  or "<p>No active subscriptions found yet. Add CSV files to the data folder and run it again.</p>"}
+{section("Likely yearly, renewing soon",
+         "Well-known services charged once, about a year ago. Most likely yearly plans due to renew. Not counted in the totals above.",
+         ["Name", "Amount", "Card", "Last charged", "Renews around", "Per month"], likely_rows,
+         f"{_money(likely_total)} a year · about {_money(likely_total / 12)} a month", ("likely-yearly", [], likely))}
 {overlap_html}
 {moves_html}
 {section("Stopped or expired", "These used to charge regularly but the latest charge didn't come.",
