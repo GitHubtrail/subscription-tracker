@@ -205,6 +205,16 @@ class DetectTests(unittest.TestCase):
             self.assertEqual({t.card for t in rows}, {"Main", "Extra"})
 
 
+    def test_overlaps(self):
+        from subtracker.detect import find_overlaps
+        rows = self._monthly("Fax.com (888)429-4615 CA", 11.99, 10, range(1, 11)) + \
+            self._monthly("HUMBLEFAX RIDGEWOOD NJ", 10.0, 22, range(1, 11))
+        subs, possible = find_subscriptions(rows, date(2026, 10, 25))
+        notes = find_overlaps(subs, possible)
+        self.assertEqual(len(notes), 1)
+        self.assertIn("Fax.com, HumbleFax", notes[0])
+
+
 class FeeAndReportTests(unittest.TestCase):
     def test_fees_kept_apart(self):
         from subtracker.parse import Transaction

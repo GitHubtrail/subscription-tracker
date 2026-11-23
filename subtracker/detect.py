@@ -18,6 +18,9 @@ KNOWN_SERVICES = [
     ("YOUTUBE TV", "YouTube TV"), ("YOUTUBETV", "YouTube TV"), ("DROPBOX SIGN", "Dropbox Sign"),
     ("GSUITE", "Google Workspace"), ("WORKSPACE_SM", "Google Workspace"),
     ("FAX.COM", "Fax.com"), ("HUMBLEFAX", "HumbleFax"), ("EFAX", "eFax"),
+    ("GOOGLE *TV", "Google TV"), ("MSBILL", "Microsoft"),
+    ("EXTRA SPACE", "Extra Space Storage"), ("PUBLIC STORAGE", "Public Storage"),
+    ("CUBESMART", "CubeSmart"), ("LIFE STORAGE", "Life Storage"), ("STORAGE RENTALS", "Storage Rentals"),
     ("ASTRA-ADDON", "Astra add-on"), ("CRICUT", "Cricut"), ("ZEE5", "ZEE5"), ("SPLASHTOP", "Splashtop"), ("REMOTEPC", "RemotePC"),
     ("ALLIANCE VIRTUAL", "Alliance Virtual Offices"), ("VOIP.MS", "VoIP.ms"),
     ("KEEPERSECURITY", "Keeper"), ("HOSTGATOR", "HostGator"), ("NAMESILO", "NameSilo"),
@@ -49,7 +52,7 @@ KNOWN_SERVICES = [
     ("DOORDASH DASHPASS", "DashPass"), ("DASHPASS", "DashPass"), ("INSTACART+", "Instacart+"),
     ("WALMART+", "Walmart+"), ("GRUBHUB+", "Grubhub+"), ("TIDAL", "Tidal"),
     ("ESPN", "ESPN+"), ("SLING", "Sling TV"), ("FUBO", "Fubo"),
-    ("IL TOLLWAY-AUTOREPLENISH", "Illinois Tollway I-PASS"), ("EZPASS", "E-ZPass"),
+    ("IL TOLLWAY-AUTO", "Illinois Tollway I-PASS"), ("EZPASS", "E-ZPass"),
     ("E-ZPASS", "E-ZPass"), ("FASTRAK", "FasTrak"), ("SUNPASS", "SunPass"),
 ]
 
@@ -300,7 +303,10 @@ def find_subscriptions(
                 lo_amt, hi_amt = sorted(t.amount for t in charges)
                 if hi_amt > lo_amt * 1.5:
                     freq = None
-            if freq and (known or forced):
+            # An unknown merchant whose price changed once or twice (a rent or
+            # plan increase) rather than on every visit (shopping).
+            steady = len(charges) >= 4 and len({t.amount for t in charges}) <= 3
+            if freq and (known or forced or steady):
                 changed = len({t.amount for t in charges}) > 1
                 found.append(_make(display, card, charges, freq, as_of[card], today, changed))
         if found:
@@ -383,6 +389,42 @@ def _join_price_changes(found: list[Subscription], as_of: date, today: date) -> 
             s = _make(s.name, s.card, charges, (s.frequency, s.period_days), as_of, today, True)
         out.append(s)
     return out
+
+
+# Services that do the same job. Paying for two from one group is worth a look.
+OVERLAP_GROUPS = {
+    "fax service": {"Fax.com", "HumbleFax", "eFax"},
+    "YouTube or Google TV plan": {"YouTube TV", "YouTube Premium", "Google TV"},
+    "remote desktop tool": {"Splashtop", "RemotePC"},
+    "cloud storage plan": {"Dropbox", "Google One", "iCloud"},
+    "storage unit": {"Extra Space Storage", "Public Storage", "CubeSmart", "Life Storage",
+                      "Storage Rentals"},
+    "VPN": {"NordVPN", "ExpressVPN"},
+    "password manager": {"1Password", "LastPass", "Keeper"},
+}
+
+
+def find_overlaps(subs: list[Subscription], possible: list[Possible]) -> list[str]:
+    """Plain-language notes on active subscriptions that may double up."""
+    active = [s for s in subs if s.active and not s.is_bill]
+    recent = [p for p in possible if not p.overdue]
+    notes = []
+    by_name: dict[str, list[Subscription]] = defaultdict(list)
+    for s in active:
+        by_name[s.name].append(s)
+    for name, items in sorted(by_name.items()):
+        if len(items) > 1:
+            parts = ", ".join(f"{_money(s.amount)} {s.frequency.lower()} on {s.card}" for s in items)
+            notes.append(f"{name} is charged {len(items)} ways: {parts}. Separate accounts, or a plan plus an add-on?")
+    for label, members in OVERLAP_GROUPS.items():
+        names = sorted({s.name for s in active if s.name in members} | {p.name for p in recent if p.name in members})
+        if len(names) > 1:
+            notes.append(f"More than one {label}: {', '.join(names)}.")
+    return notes
+
+
+def _money(x: float) -> str:
+    return f"${x:,.2f}"
 
 
 ANNUAL_FEE = re.compile(r"ANNUAL FEE|MEMBERSHIP FEE", re.I)

@@ -24,7 +24,7 @@ def totals(subs: list[Subscription]) -> tuple[float, float]:
 
 
 def text_report(subs: list[Subscription], possible: list[Possible], problems: list[str],
-                fees: list[CardFees] | None = None) -> str:
+                fees: list[CardFees] | None = None, overlaps: list[str] | None = None) -> str:
     lines = []
     for p in problems:
         lines.append(f"! {p}")
@@ -47,6 +47,10 @@ def text_report(subs: list[Subscription], possible: list[Possible], problems: li
         lines.append(row.format("Name", "Amount", "Billed", "Card", "Last charged"))
         for s in stopped:
             lines.append(row.format(s.name[:28], _money(s.amount), s.frequency, s.card[:36], _d(s.last_charged)))
+        lines.append("")
+    if overlaps:
+        lines.append("POSSIBLE OVERLAPS")
+        lines.extend(f"  - {n}" for n in overlaps)
         lines.append("")
     if possible:
         lines.append("CHECK THESE (known services with no clear billing pattern yet)")
@@ -88,7 +92,8 @@ def write_csv(subs: list[Subscription], path: Path) -> None:
             ])
 
 
-def html_report(subs, possible, problems, today: date, fees: list[CardFees] | None = None) -> str:
+def html_report(subs, possible, problems, today: date, fees: list[CardFees] | None = None,
+                overlaps: list[str] | None = None) -> str:
     e = html.escape
     bills = [s for s in subs if s.is_bill and s.active]
     subs = [s for s in subs if not s.is_bill]
@@ -141,6 +146,10 @@ def html_report(subs, possible, problems, today: date, fees: list[CardFees] | No
         + "</ul></details></td></tr>"
         for f in (fees or [])
     )
+    overlap_html = (
+        "<h2>Possible overlaps</h2><p class='note'>Worth checking whether you need all of these.</p><ul class='overlaps'>"
+        + "".join(f"<li>{e(n)}</li>" for n in overlaps) + "</ul>"
+    ) if overlaps else ""
     problem_html = "".join(f"<p class='problem'>{e(p)}</p>" for p in problems)
 
     def section(title, note, head, rows):
@@ -172,10 +181,12 @@ th, td {{ text-align:left; padding:10px 12px; border-bottom:1px solid var(--line
 th {{ font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); font-weight:600; }}
 tr:last-child td {{ border-bottom:0; }}
 .num {{ text-align:right; font-variant-numeric:tabular-nums; }}
-.name {{ font-weight:600; white-space:normal; }}
+.name {{ font-weight:600; white-space:normal; min-width:170px; }}
 .soon {{ color:var(--warn); font-weight:600; }}
 .tag {{ font-size:11px; font-weight:500; color:var(--warn); border:1px solid currentColor; border-radius:4px; padding:0 4px; margin-left:4px; }}
 details summary {{ cursor:pointer; color:var(--accent); }} details ul {{ margin:6px 0 0; padding-left:18px; color:var(--muted); }}
+.overlaps {{ background:var(--card); border:1px solid var(--line); border-radius:10px; margin:0; padding:12px 12px 12px 32px; }}
+.overlaps li {{ margin:4px 0; }}
 .problem {{ background:var(--card); border-left:3px solid var(--warn); padding:8px 12px; }}
 </style></head>
 <body><main>
@@ -190,6 +201,7 @@ details summary {{ cursor:pointer; color:var(--accent); }} details ul {{ margin:
 {section("Active", "Charged on schedule. Totals include only these.",
          ["Name", "Amount", "Billed", "Card", "Next renewal", "Per month", "History"], active_rows)
  or "<p>No active subscriptions found yet. Add CSV files to the data folder and run it again.</p>"}
+{overlap_html}
 {section("Stopped or expired", "These used to charge regularly but the latest charge didn't come.",
          ["Name", "Amount", "Billed", "Card", "Last charged", "History"], stopped_rows)}
 {section("Check these", "Well-known services charged once, or at uneven times, so the billing cycle isn't clear yet.",
