@@ -171,6 +171,18 @@ class FeeAndReportTests(unittest.TestCase):
         fees = fees_by_card(rows)
         self.assertEqual(fees[0].last_12_months, 975.0)
 
+    def test_refunded_late_fee_cancels_out(self):
+        from subtracker.parse import FEE_CREDITS
+        self.assertTrue(FEE_CREDITS.search("REFUND LATE FEE"))
+
+    def test_missed_yearly_renewal(self):
+        from subtracker.parse import Transaction
+        rows = [Transaction(date(2025, 4, 1), "COSTCO *ANNUAL RENEWAL 800-774-2678 WA", 65.0, "Card", "x"),
+                Transaction(date(2026, 11, 1), "COSTCO WHSE #0388", 120.0, "Card", "x")]
+        _, possible = find_subscriptions(rows, TODAY)
+        self.assertEqual(possible[0].name, "Costco Membership")
+        self.assertTrue(possible[0].overdue)
+
     def test_reports_render(self):
         rows, problems = read_folder(FIXTURES)
         subs, possible = find_subscriptions(rows, TODAY)

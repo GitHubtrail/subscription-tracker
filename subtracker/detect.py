@@ -30,7 +30,8 @@ KNOWN_SERVICES = [
     ("ANTHROPIC", "Claude"), ("CLAUDE.AI", "Claude"), ("NORDVPN", "NordVPN"),
     ("EXPRESSVPN", "ExpressVPN"), ("DUOLINGO", "Duolingo"), ("HEADSPACE", "Headspace"),
     ("CALM.COM", "Calm"), ("PELOTON", "Peloton"), ("PLANET FITNESS", "Planet Fitness"),
-    ("COSTCO MEMBERSHIP", "Costco Membership"), ("SAMS CLUB MEMBER", "Sam's Club Membership"),
+    ("COSTCO MEMBERSHIP", "Costco Membership"), ("COSTCO *ANNUAL", "Costco Membership"),
+    ("COSTCO ANNUAL", "Costco Membership"), ("SAMS CLUB MEMBER", "Sam's Club Membership"),
     ("LINKEDIN", "LinkedIn Premium"), ("CANVA", "Canva"), ("NOTION", "Notion"),
     ("1PASSWORD", "1Password"), ("LASTPASS", "LastPass"), ("GITHUB", "GitHub"),
     ("ZOOM.US", "Zoom"), ("CRUNCHYROLL", "Crunchyroll"), ("STARZ", "Starz"),
@@ -117,6 +118,7 @@ class Possible:
     amount: float
     charged: date
     times: int = 1
+    overdue: bool = False  # a yearly renewal should have shown up by now
 
     @property
     def renews_if_yearly(self) -> date:
@@ -280,7 +282,8 @@ def find_subscriptions(
             subs.extend(found)
         elif known:
             t = charges[-1]
-            possible.append(Possible(display, card, t.amount, t.date, len(charges)))
+            overdue = (as_of[card] - t.date).days > 365 + 14
+            possible.append(Possible(display, card, t.amount, t.date, len(charges), overdue))
 
     subs.sort(key=lambda s: (s.is_bill, not s.active, s.name.lower(), s.card))
     possible.sort(key=lambda p: p.charged, reverse=True)
