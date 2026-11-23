@@ -391,6 +391,13 @@ class DownloadNameTests(unittest.TestCase):
         self.assertEqual(cards, {"activity.csv": "Gold", "activity (1).csv": "Green", "activity (2).csv": "Blue"})
         self.assertEqual(problems, [])
 
+    def test_file_names_match_loosely(self):
+        from subtracker.parse import _name_for_file
+        files = {"Year to date 1.CSV": "Advantage", "Last_year_2025.csv": "Advantage"}
+        self.assertEqual(_name_for_file("Year to date (1).csv", files, {}), "Advantage")
+        self.assertEqual(_name_for_file("last year (2025).CSV", files, {}), "Advantage")
+        self.assertEqual(_name_for_file("Year to date (2).csv", files, {}), "")
+
     def test_loan_file_is_recognised(self):
         with tempfile.TemporaryDirectory() as d:
             Path(d, "activity (7).csv").write_text(

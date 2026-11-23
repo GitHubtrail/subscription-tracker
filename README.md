@@ -104,7 +104,7 @@ Copy `overrides.example.json` to `overrides.json` and edit it:
 
 - `cards`: a name for each card, by its last four digits.
 - `files`: the card for files that have no card number in them, by file
-  name. `*` matches anything, so `"activity*.csv": "1234"` puts every such
+  name (case, spaces, underscores and brackets don't matter). `*` matches anything, so `"activity*.csv": "1234"` puts every such
   Amex download on card 1234. A file with its own card number is never moved
   by a pattern, and an exact file name wins over a pattern. The right side
   can be the last four digits from `cards`, or a name.

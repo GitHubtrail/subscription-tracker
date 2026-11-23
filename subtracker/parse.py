@@ -328,12 +328,17 @@ def _read(path: Path, formats: dict | None, card_names: dict | None,
     return out, issuer, known
 
 
+def _loose(file_name: str) -> str:
+    """'Year to date (1).CSV' and 'year_to_date 1.csv' compare the same."""
+    return re.sub(r"[\s_\-]+", " ", re.sub(r"[()]", " ", file_name.lower())).strip().replace(" .", ".")
+
+
 def _name_for_file(file_name: str, files: dict | None, card_names: dict, wildcards: bool = True) -> str:
     """The card named for this file in overrides.json "files". Exact names
     are checked first; patterns like "activity*.csv" only when wildcards."""
+    name = _loose(file_name)
     for pattern, card in (files or {}).items():
-        if pattern.lower() == file_name.lower() or (
-                wildcards and fnmatch.fnmatch(file_name.lower(), pattern.lower())):
+        if _loose(pattern) == name or (wildcards and fnmatch.fnmatch(name, _loose(pattern))):
             key = card[-4:] if card.isdigit() else card.lower()
             return card_names.get(key, card)
     return ""
