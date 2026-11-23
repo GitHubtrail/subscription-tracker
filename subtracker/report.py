@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import csv
 import html
+import io
+from urllib.parse import quote
 from datetime import date
 from pathlib import Path
 
@@ -59,6 +61,16 @@ def text_report(subs: list[Subscription], possible: list[Possible], problems: li
         lines.append("POSSIBLE OVERLAPS")
         lines.extend(f"  - {n}" for n in overlaps)
         lines.append("")
+    likely = [p for p in possible if p.likely_yearly]
+    possible = [p for p in possible if not p.likely_yearly]
+    if likely:
+        total = sum(p.amount for p in likely)
+        lines.append(f"LIKELY YEARLY, RENEWING SOON (one charge about a year ago; "
+                     f"{_money(total)} a year, about {_money(total / 12)} a month; not in the totals above)")
+        for p in likely:
+            lines.append(f"  {p.name} {_money(p.amount)} on {p.card}, last {_d(p.charged)}, "
+                         f"renews around {_d(p.renews_if_yearly)}")
+        lines.append("")
     if possible:
         lines.append("CHECK THESE (known services with no clear billing pattern yet)")
         for p in possible:
@@ -102,24 +114,101 @@ def text_report(subs: list[Subscription], possible: list[Possible], problems: li
     return "\n".join(lines)
 
 
-def write_csv(subs: list[Subscription], path: Path) -> None:
-    with path.open("w", newline="", encoding="utf-8-sig") as f:  # -sig so Excel reads it right
-        w = csv.writer(f)
-        w.writerow(["Name", "Type", "Status", "Amount", "Billed", "Card", "First charged",
-                    "Last charged", "Next renewal", "Per month", "Per year"])
-        for s in subs:
-            w.writerow([
-                s.name, "Payment plan" if s.is_plan else "Bill" if s.is_bill else "Subscription", "Active" if s.active else "Stopped", f"{s.typical:.2f}", s.frequency,
-                s.card, s.first_charged.isoformat(), s.last_charged.isoformat(),
-                s.next_renewal.isoformat() if s.active else "",
-                f"{s.monthly_cost:.2f}", f"{s.yearly_cost:.2f}",
-            ])
+CSV_HEADER = ["Name", "Type", "Status", "Amount", "Billed", "Card", "First charged",
+              "Last charged", "Next renewal", "Per month", "Per year"]
+
+
+def csv_rows(subs: list[Subscription], possible: list[Possible] | None = None) -> list[list[str]]:
+    """Every item in the report, one row each, for report.csv and the
+    report's Download button."""
+    rows = [CSV_HEADER]
+    order = sorted(subs, key=lambda s: (not s.active, s.is_bill, s.is_plan, s.name.lower()))
+    for s in order:
+        rows.append([
+            s.name, "Payment plan" if s.is_plan else "Bill" if s.is_bill else "Subscription",
+            "Active" if s.active else "Stopped", f"{s.typical:.2f}", s.frequency,
+            s.card, s.first_charged.isoformat(), s.last_charged.isoformat(),
+            s.next_renewal.isoformat() if s.active else "",
+            f"{s.monthly_cost:.2f}" if s.active else "", f"{s.yearly_cost:.2f}" if s.active else "",
+        ])
+    for p in possible or []:
+        status = (f"Renewed on {p.moved_to[0]}" if p.moved_to else
+                  "Likely yearly" if p.likely_yearly else
+                  "Check these (renewal missed)" if p.overdue else "Check these")
+        rows.append([
+            p.name, "Subscription", status, f"{p.amount:.2f}", "Yearly (likely)" if p.likely_yearly else "Not clear yet",
+            p.card, "", p.charged.isoformat(),
+            "" if p.moved_to or p.times >= 3 else p.renews_if_yearly.isoformat(),
+            f"{p.amount / 12:.2f}" if p.likely_yearly else "", f"{p.amount:.2f}" if p.likely_yearly else "",
+        ])
+    return rows
+
+
+def csv_text(subs: list[Subscription], possible: list[Possible] | None = None) -> str:
+    out = io.StringIO()
+    csv.writer(out, lineterminator="\r\n").writerows(csv_rows(subs, possible))
+    return out.getvalue()
+
+
+def _csv_href(subs: list[Subscription], possible: list[Possible] | None = None) -> str:
+    """A link target holding the CSV itself, so downloads work offline."""
+    return "data:text/csv;charset=utf-8," + quote("\ufeff" + csv_text(subs, possible))
+
+
+def write_csv(subs: list[Subscription], path: Path, possible: list[Possible] | None = None) -> None:
+    # utf-8-sig so Excel reads names with accents right.
+    path.write_text(csv_text(subs, possible), encoding="utf-8-sig", newline="")
+
+
+# Click a column heading to sort that table; click again to reverse. Plain
+# JavaScript in the page, so it works from the saved file with no internet.
+SORT_JS = """<script>
+(function () {
+  var DATE = /[A-Z][a-z]{2} \\d{1,2}, \\d{4}/;
+  function key(td) {
+    var text = (td.innerText || td.textContent).trim().split("\\n")[0].trim();
+    var money = text.match(/^\\$-?[\\d,]+(\\.\\d+)?/);
+    if (money) return [0, parseFloat(money[0].replace(/[$,]/g, ""))];
+    var d = text.match(DATE);
+    if (d && !isNaN(Date.parse(d[0]))) return [0, Date.parse(d[0])];
+    var n = text.match(/^(\\d+) charges?/);
+    if (n) return [0, parseInt(n[1], 10)];
+    if (!text || text === "\\u2013") return [2, ""];
+    return [1, text.toLowerCase()];
+  }
+  document.querySelectorAll("table").forEach(function (table) {
+    var heads = table.querySelectorAll("thead th");
+    heads.forEach(function (th, col) {
+      th.classList.add("sortable");
+      th.setAttribute("title", "Sort");
+      th.addEventListener("click", function () {
+        var up = th.getAttribute("aria-sort") !== "ascending";
+        heads.forEach(function (h) { h.removeAttribute("aria-sort"); });
+        th.setAttribute("aria-sort", up ? "ascending" : "descending");
+        var body = table.tBodies[0];
+        var rows = Array.prototype.slice.call(body.rows);
+        rows.sort(function (a, b) {
+          var x = key(a.cells[col]), y = key(b.cells[col]);
+          if (x[0] !== y[0]) return x[0] - y[0];  // blanks always last
+          var c = x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0;
+          return up ? c : -c;
+        });
+        rows.forEach(function (r) { body.appendChild(r); });
+      });
+    });
+  });
+})();
+</script>"""
 
 
 def html_report(subs, possible, problems, today: date, fees: list[CardFees] | None = None,
                 overlaps: list[str] | None = None, loans: list[Loan] | None = None,
                 moves: list[str] | None = None) -> str:
     e = html.escape
+    # The whole list rides along inside the page, so the Download button
+    # works from the saved file with no internet and no server.
+    csv_href = _csv_href(subs, possible)
+    csv_name = f"subscriptions-{today.isoformat()}.csv"
     plans = [s for s in subs if s.is_plan]
     subs = [s for s in subs if not s.is_plan]
     bills = [s for s in subs if s.is_bill and s.active]
@@ -149,6 +238,16 @@ def html_report(subs, possible, problems, today: date, fees: list[CardFees] | No
         f"<td>{e(s.frequency)}</td><td>{e(s.card)}</td><td class='date'>{_d(s.last_charged)}</td>"
         f"<td>{history(s)}</td></tr>"
         for s in stopped
+    )
+    likely = [p for p in possible if p.likely_yearly]
+    possible = [p for p in possible if not p.likely_yearly]
+    likely_total = sum(p.amount for p in likely)
+    likely_rows = "".join(
+        f"<tr><td class='name'>{e(p.name)}</td><td class='num'>{_money(p.amount)}</td>"
+        f"<td>{e(p.card)}</td><td class='date'>{_d(p.charged)}</td>"
+        f"<td class='date{' soon' if (p.renews_if_yearly - today).days <= 7 else ''}'>{_d(p.renews_if_yearly)}</td>"
+        f"<td class='num'>{_money(p.amount / 12)}</td></tr>"
+        for p in sorted(likely, key=lambda p: p.charged)
     )
     possible_rows = "".join(
         f"<tr><td class='name'>{e(p.name)}</td><td class='num'>{_money(p.amount)}</td>"
@@ -203,11 +302,19 @@ def html_report(subs, possible, problems, today: date, fees: list[CardFees] | No
     ) if moves else ""
     problem_html = "".join(f"<p class='problem'>{e(p)}</p>" for p in problems)
 
-    def section(title, note, head, rows):
+    def section(title, note, head, rows, total="", download=None):
+        """download is (file name part, subscriptions, possibles) for a
+        button that saves just this section."""
         if not rows:
             return ""
         ths = "".join(f"<th>{h}</th>" for h in head)
-        return (f"<h2>{title}</h2><p class='note'>{note}</p>"
+        total_html = f" <span class='total'>{e(total)}</span>" if total else ""
+        button = ""
+        if download:
+            part, items, maybe = download
+            button = (f"<a class='download small' href='{_csv_href(items, maybe)}' "
+                      f"download='subscriptions-{part}-{today.isoformat()}.csv'>Download (Excel)</a>")
+        return (f"<div class='section-head'><h2>{e(title)}{total_html}</h2>{button}</div><p class='note'>{note}</p>"
                 f"<div class='scroll'><table><thead><tr>{ths}</tr></thead><tbody>{rows}</tbody></table></div>")
 
     return f"""<!doctype html>
@@ -222,6 +329,18 @@ body {{ margin:0; background:var(--bg); color:var(--text); font:15px/1.5 -apple-
 main {{ margin:0 auto; padding:32px 24px 64px; }}
 h1 {{ margin:0 0 4px; font-size:26px; }} h2 {{ margin:36px 0 4px; font-size:18px; }}
 .note, .sub {{ color:var(--muted); margin:0 0 12px; }}
+.top {{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }}
+.download {{ background:var(--accent); color:var(--card); text-decoration:none; font-weight:600; font-size:14px; padding:9px 16px; border-radius:8px; white-space:nowrap; }}
+.sortable {{ cursor:pointer; user-select:none; }} .sortable:hover {{ color:var(--text); }}
+th.sortable::after {{ content:'\\2195'; opacity:.35; margin-left:4px; }}
+th[aria-sort=ascending]::after {{ content:'\\25B2'; opacity:1; color:var(--accent); }}
+th[aria-sort=descending]::after {{ content:'\\25BC'; opacity:1; color:var(--accent); }}
+.download.small {{ font-size:13px; padding:6px 12px; }}
+.section-head {{ display:flex; align-items:flex-end; justify-content:space-between; gap:12px; flex-wrap:wrap; margin:36px 0 4px; }}
+.section-head h2 {{ margin:0; }}
+.total {{ font-weight:500; font-size:15px; color:var(--muted); margin-left:6px; }}
+.download:hover {{ filter:brightness(1.08); }}
+@media print {{ .download {{ display:none; }} }}
 .totals {{ display:flex; gap:12px; flex-wrap:wrap; margin:20px 0 8px; }}
 .tile {{ background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 18px; min-width:160px; }}
 .tile b {{ display:block; font-size:24px; font-variant-numeric:tabular-nums; }}
@@ -244,7 +363,8 @@ details summary {{ cursor:pointer; color:var(--accent); white-space:nowrap; }} d
 .problem {{ background:var(--card); border-left:3px solid var(--warn); padding:8px 12px; }}
 </style></head>
 <body><main>
-<h1>My Subscriptions</h1>
+<div class="top"><h1>My Subscriptions</h1>
+<a class="download" href="{csv_href}" download="{csv_name}">Download list (Excel)</a></div>
 <p class="sub">From your credit card files, updated {_d(today)}. Renewals due within a week are highlighted.</p>
 {problem_html}
 <div class="totals">
@@ -253,23 +373,33 @@ details summary {{ cursor:pointer; color:var(--accent); white-space:nowrap; }} d
   <div class="tile"><b>{len(active)}</b><span>active subscriptions</span></div>
 </div>
 {section("Active", "Charged on schedule. Totals include only these.",
-         ["Name", "Amount", "Billed", "Card", "Next renewal", "Per month", "History"], active_rows)
+         ["Name", "Amount", "Billed", "Card", "Next renewal", "Per month", "History"], active_rows,
+         f"{_money(monthly)} a month · {_money(yearly)} a year", ("active", active, None))
  or "<p>No active subscriptions found yet. Add CSV files to the data folder and run it again.</p>"}
+{section("Likely yearly, renewing soon",
+         "Well-known services charged once, about a year ago. Most likely yearly plans due to renew. Not counted in the totals above.",
+         ["Name", "Amount", "Card", "Last charged", "Renews around", "Per month"], likely_rows,
+         f"{_money(likely_total)} a year · about {_money(likely_total / 12)} a month", ("likely-yearly", [], likely))}
 {overlap_html}
 {moves_html}
 {section("Stopped or expired", "These used to charge regularly but the latest charge didn't come.",
-         ["Name", "Amount", "Billed", "Card", "Last charged", "History"], stopped_rows)}
+         ["Name", "Amount", "Billed", "Card", "Last charged", "History"], stopped_rows,
+         f"used to cost {_money(sum(s.monthly_cost for s in stopped))} a month · "
+         f"{_money(sum(s.yearly_cost for s in stopped))} a year", ("stopped", stopped, None))}
 {section("Check these", "Well-known services charged once, or at uneven times, so the billing cycle isn't clear yet.",
-         ["Name", "Amount", "Card", "Last charged", "If yearly, renews"], possible_rows)}
-{section(f"Bills and utilities · about {_money(bill_monthly)} a month",
+         ["Name", "Amount", "Card", "Last charged", "If yearly, renews"], possible_rows,
+         f"{_money(sum(p.amount for p in possible))} in latest charges", ("check-these", [], possible))}
+{section("Bills and utilities",
          "Regular household bills. The amount changes each time, so this shows the recent average. Not counted in the subscription totals.",
-         ["Name", "Average", "Billed", "Card", "Next bill (estimate)", "Per month", "History"], bill_rows)}
-{section(f"Payment plans · about {_money(plan_monthly)} a month",
+         ["Name", "Average", "Billed", "Card", "Next bill (estimate)", "Per month", "History"], bill_rows,
+         f"about {_money(bill_monthly)} a month · {_money(bill_monthly * 12)} a year", ("bills", bills, None))}
+{section("Payment plans",
          "Instalments toward a bill, such as medical or legal fees. Not counted in the subscription totals.",
-         ["Name", "Amount", "Billed", "Card", "Next payment", "History"], plan_rows)}
+         ["Name", "Amount", "Billed", "Card", "Next payment", "History"], plan_rows,
+         f"about {_money(plan_monthly)} a month", ("payment-plans", [s for s in plans if s.active], None))}
 {section("Loans", "Monthly loan payments and the interest in them. Not counted in the subscription totals.",
          ["Loan", "Monthly payment", "Next payment (estimate)", "Interest per month", "History"], loan_rows)}
 {section("Interest and fees", "Charged by the card itself. Not counted in the subscription totals.",
          ["Card", "Last 12 months", "Per month", "Charges"], fee_rows)}
-</main></body></html>
+</main>{SORT_JS}</body></html>
 """

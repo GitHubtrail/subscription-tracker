@@ -19,8 +19,12 @@ It needs only Python 3.10 or newer. There is nothing to install.
    ```
 
    (On Windows, type `python` instead of `python3`.) It prints a summary,
-   then saves and opens `report.html`. It also saves `report.csv` if you want
-   the list in a spreadsheet.
+   then saves and opens `report.html`. The **Download list (Excel)** button
+   at the top of the report saves every subscription with its status as a
+   file Excel opens. Each section (Active, Stopped, Check these, Bills,
+   Payment plans) shows its own total and has its own Download button.
+   The full list is also saved as `report.csv`. Click any column heading
+   to sort that table by it, and click again to reverse.
 
 To have it update by itself while you add files, run
 `python3 tracker.py --watch`. It rebuilds the report whenever a file in
@@ -70,8 +74,11 @@ Your CSV files, `report.html`, `report.csv` and `overrides.json` are listed in
   services that do the same job (two fax services, two storage units).
 - **Stopped or expired**: things that used to charge regularly but missed
   their latest charge, with the date of the last one.
-- **Check these**: well-known services charged only once so far, with the
-  date they would renew if they're yearly.
+- **Likely yearly, renewing soon**: well-known services charged once, about
+  a year ago, with the date they should renew. They have their own total and
+  are not in the Active totals.
+- **Check these**: well-known services charged only once so far, or at
+  uneven times, with the date they would renew if they're yearly.
 - **Bills and utilities**: water, trash and similar bills whose amount changes
   each time. Shown with the recent average and kept out of the subscription
   totals.
@@ -83,10 +90,12 @@ Your CSV files, `report.html`, `report.csv` and `overrides.json` are listed in
   months.
 
 A charge counts as a subscription when the same merchant charges the same
-card a steady price at a regular interval (weekly up to yearly). Well-known
-services such as Netflix or Kindle Unlimited need only two charges, and a
-price change is allowed. Auto top-ups that charge the same amount at uneven
-times, like I-PASS tolls, are included too.
+card a steady price at a regular interval (weekly up to yearly). It takes at
+least three charges, except for a yearly plan from a well-known service such
+as Netflix or TradingView, where two are enough. A price change is allowed.
+Auto top-ups that charge the same amount at uneven times, like I-PASS tolls,
+are included too. In-flight Wi-Fi, airfare and hotels are never counted, even
+when the same price repeats.
 
 ## Name your cards, hide or add items
 

@@ -41,7 +41,7 @@ def build(data: Path, out: Path, today: date | None = None, quiet: bool = False)
     out.mkdir(parents=True, exist_ok=True)
     (out / "report.html").write_text(html_report(subs, possible, problems, today, fees, overlaps, loans, moves),
                                   encoding="utf-8")
-    write_csv(subs, out / "report.csv")
+    write_csv(subs, out / "report.csv", possible)
     if not quiet:
         print(text_report(subs, possible, problems, fees, overlaps, loans, moves))
         print(f"\nSaved {out / 'report.html'} and {out / 'report.csv'}")
