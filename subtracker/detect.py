@@ -14,6 +14,14 @@ from .parse import Transaction
 # Well-known services. A match gives a clean name, merges spelling variants
 # ("NETFLIX.COM", "NETFLIX INC") and lets a service count with fewer charges.
 KNOWN_SERVICES = [
+    # More specific names first: "YOUTUBE TV" before "YOUTUBE", and so on.
+    ("YOUTUBE TV", "YouTube TV"), ("YOUTUBETV", "YouTube TV"), ("DROPBOX SIGN", "Dropbox Sign"),
+    ("GSUITE", "Google Workspace"), ("WORKSPACE_SM", "Google Workspace"),
+    ("FAX.COM", "Fax.com"), ("HUMBLEFAX", "HumbleFax"), ("EFAX", "eFax"),
+    ("ZEE5", "ZEE5"), ("SPLASHTOP", "Splashtop"), ("REMOTEPC", "RemotePC"),
+    ("ALLIANCE VIRTUAL", "Alliance Virtual Offices"), ("VOIP.MS", "VoIP.ms"),
+    ("KEEPERSECURITY", "Keeper"), ("HOSTGATOR", "HostGator"), ("NAMESILO", "NameSilo"),
+    ("GODADDY", "GoDaddy"), ("SQUARESPACE", "Squarespace"), ("BLOOMBERG", "Bloomberg"),
     ("NETFLIX", "Netflix"), ("SPOTIFY", "Spotify"), ("HULU", "Hulu"),
     ("DISNEY", "Disney+"), ("HBO", "Max"), ("MAX.COM", "Max"),
     ("YOUTUBE", "YouTube Premium"), ("APPLE.COM/BILL", "Apple (App Store / iCloud)"),
@@ -70,6 +78,7 @@ FREQUENCIES = [
     ("Monthly", 30.44, (25, 37), 3),
     ("Every 2 months", 60.9, (55, 67), 3),
     ("Quarterly", 91.3, (82, 100), 2),
+    ("Every 4 months", 121.75, (110, 135), 2),
     ("Every 6 months", 182.6, (170, 195), 2),
     ("Yearly", 365.25, (340, 390), 2),
 ]
@@ -167,7 +176,7 @@ def _match_frequency(charges: list[Transaction], known: bool, forced: bool):
     for name, days, (lo, hi), min_count in FREQUENCIES:
         if not lo <= typical <= hi:
             continue
-        needed = 2 if known or forced else min_count
+        needed = 2 if (known or forced) and days >= 28 else min_count
         if len(charges) == 2 and len({t.amount for t in charges}) == 1 and days <= 31:
             needed = 2
         if len(charges) < needed:
@@ -268,13 +277,24 @@ def find_subscriptions(
             freq = _match_frequency(cluster, known, forced=False)
             if freq:
                 found.append(_make(display, card, cluster, freq, as_of[card], today))
+            elif known or forced:
+                # Two accounts with one company bill on different days of the
+                # month at the same price: split them by billing day.
+                for series in _split_by_day(cluster):
+                    freq = _match_frequency(series, known, forced=False)
+                    if freq and freq[1] >= 28:
+                        found.append(_make(display, card, series, freq, as_of[card], today))
         found = _join_price_changes(found, as_of[card], today)
+        found = _fold_odd_months(found, as_of[card], today)
         if not found:
             # Maybe the price went up partway through: try all charges together.
             freq = _match_frequency(charges, known, forced)
-            # Two charges at different prices are only convincing when close together.
+            # Two charges far apart are convincing only if the price is close
+            # (a yearly plan that went up), not wildly different (one-off buys).
             if freq and len(charges) == 2 and freq[1] > 40 and not forced:
-                freq = None
+                lo_amt, hi_amt = sorted(t.amount for t in charges)
+                if hi_amt > lo_amt * 1.5:
+                    freq = None
             if freq and (known or forced):
                 changed = len({t.amount for t in charges}) > 1
                 found.append(_make(display, card, charges, freq, as_of[card], today, changed))
@@ -289,6 +309,43 @@ def find_subscriptions(
     possible.sort(key=lambda p: p.charged, reverse=True)
     return subs, possible
 
+
+
+def _split_by_day(charges: list[Transaction]) -> list[list[Transaction]]:
+    groups: list[list[Transaction]] = []
+    for t in sorted(charges, key=lambda t: t.date.day):
+        if groups and t.date.day - groups[-1][-1].date.day <= 3:
+            groups[-1].append(t)
+        else:
+            groups.append([t])
+    if len(groups) < 2:
+        return []
+    return [sorted(g, key=lambda t: t.date) for g in groups if len(g) >= 2]
+
+
+def _fold_odd_months(found: list[Subscription], as_of: date, today: date) -> list[Subscription]:
+    """A monthly plan that charges a different amount in some months (say a
+    higher February bill) shows up as a second, sparse series landing in
+    exactly the months the main series skips. Fold it back in."""
+    monthly = [s for s in found if s.frequency == "Monthly"]
+    if not monthly:
+        return found
+    out = list(found)
+    for main in monthly:
+        if main not in out:
+            continue
+        months = {(t.date.year, t.date.month) for t in main.charges}
+        day = median(t.date.day for t in main.charges)
+        for other in [s for s in out if s is not main and len(s.charges) < len(main.charges)]:
+            if all((t.date.year, t.date.month) not in months and abs(t.date.day - day) <= 4
+                   for t in other.charges):
+                out.remove(other)
+                out.remove(main)
+                charges = sorted(main.charges + other.charges, key=lambda t: t.date)
+                main = _make(main.name, main.card, charges, ("Monthly", main.period_days), as_of, today, True)
+                out.append(main)
+                months = {(t.date.year, t.date.month) for t in main.charges}
+    return out
 
 
 def _join_price_changes(found: list[Subscription], as_of: date, today: date) -> list[Subscription]:

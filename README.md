@@ -24,6 +24,11 @@ To have it update by itself while you add files, run
 `python3 tracker.py --watch`. It rebuilds the report whenever a file in
 `data` changes. Press Ctrl+C to stop.
 
+Overlapping downloads are fine: a charge that appears in more than one file
+is counted once. If your bank gives every download the same name (Amex uses
+`activity.csv`), rename each one to start with the card, for example
+`amex_8330_1.csv`, `amex_8330_2.csv`. The four digits become the card number.
+
 Your CSV files, `report.html`, `report.csv` and `overrides.json` are listed in
 `.gitignore`, so they are never committed.
 

@@ -158,6 +158,32 @@ class DetectTests(unittest.TestCase):
         self.assertEqual(merchant_name("UBER   *ONE MEMBERSHIP")[0], "Uber One")
 
 
+    def _monthly(self, desc, amount, day, months, overrides=None):
+        from subtracker.parse import Transaction
+        return [Transaction(date(2026, m, day), desc, overrides.get(m, amount) if overrides else amount,
+                            "Card", "x") for m in months]
+
+    def test_two_accounts_billed_on_different_days(self):
+        rows = self._monthly("Fax.com (888)429-4615 CA", 11.99, 10, range(1, 11)) + \
+            self._monthly("Fax.com (888)429-4615 CA", 11.99, 16, range(1, 11))
+        subs, _ = find_subscriptions(rows, date(2026, 10, 20))
+        self.assertEqual(sorted(s.charges[0].date.day for s in subs), [10, 16])
+
+    def test_odd_month_price_folds_into_monthly(self):
+        rows = self._monthly("GOOGLE *WORKSPACE_SMCC@GOOGLE.COM CA", 28.0, 1, range(1, 11), {2: 34.0})
+        subs, _ = find_subscriptions(rows, date(2026, 10, 20))
+        self.assertEqual(len(subs), 1)
+        self.assertEqual(subs[0].frequency, "Monthly")
+
+    def test_yearly_price_increase(self):
+        from subtracker.parse import Transaction
+        rows = [Transaction(date(2025, 2, 26), "AIRTABLE.COM/BILL", 204.98, "Card", "x"),
+                Transaction(date(2026, 2, 26), "AIRTABLE.COM/BILL", 240.00, "Card", "x")]
+        subs, _ = find_subscriptions(rows, TODAY)
+        self.assertEqual(subs[0].frequency, "Yearly")
+        self.assertTrue(subs[0].price_changed)
+
+
 class FeeAndReportTests(unittest.TestCase):
     def test_fees_kept_apart(self):
         from subtracker.parse import Transaction
