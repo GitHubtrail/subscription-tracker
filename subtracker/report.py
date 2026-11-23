@@ -32,12 +32,12 @@ def text_report(subs: list[Subscription], possible: list[Possible], problems: li
     subs = [s for s in subs if not s.is_bill]
     active = [s for s in subs if s.active]
     stopped = [s for s in subs if not s.active]
-    row = "{:<28} {:>10}  {:<36} {:<28} {:<14}"
+    row = "{:<28} {:>10}  {:<36} {:<36} {:<14}"
     if active:
         lines.append("ACTIVE SUBSCRIPTIONS")
         lines.append(row.format("Name", "Amount", "Billed", "Card", "Next renewal"))
         for s in active:
-            lines.append(row.format(s.name[:28], _money(s.amount), s.frequency, s.card[:28], _d(s.next_renewal)))
+            lines.append(row.format(s.name[:28], _money(s.amount), s.frequency, s.card[:36], _d(s.next_renewal)))
         monthly, yearly = totals(subs)
         lines.append(f"\nTotal: {_money(monthly)} a month, {_money(yearly)} a year\n")
     else:
@@ -46,7 +46,7 @@ def text_report(subs: list[Subscription], possible: list[Possible], problems: li
         lines.append("STOPPED OR EXPIRED (no recent charge)")
         lines.append(row.format("Name", "Amount", "Billed", "Card", "Last charged"))
         for s in stopped:
-            lines.append(row.format(s.name[:28], _money(s.amount), s.frequency, s.card[:28], _d(s.last_charged)))
+            lines.append(row.format(s.name[:28], _money(s.amount), s.frequency, s.card[:36], _d(s.last_charged)))
         lines.append("")
     if possible:
         lines.append("CHECK THESE (known services with no clear billing pattern yet)")
@@ -60,7 +60,7 @@ def text_report(subs: list[Subscription], possible: list[Possible], problems: li
         lines.append("BILLS AND UTILITIES (amounts vary; not counted in the totals above)")
         lines.append(row.format("Name", "Average", "Billed", "Card", "Next bill"))
         for s in bills:
-            lines.append(row.format(s.name[:28], _money(s.average), s.frequency, s.card[:28], _d(s.next_renewal)))
+            lines.append(row.format(s.name[:28], _money(s.average), s.frequency, s.card[:36], _d(s.next_renewal)))
         monthly, yearly = totals(bills)
         lines.append(f"\nBills total: about {_money(monthly)} a month, {_money(yearly)} a year\n")
     if fees:

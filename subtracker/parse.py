@@ -31,7 +31,7 @@ COLUMN_ALIASES = {
     "debit": ["debit", "debits", "withdrawal", "withdrawals", "charge", "charges"],
     "credit": ["credit", "credits", "deposit", "deposits", "payment"],
     "category": ["category", "transaction category"],
-    "card": ["card no.", "card number", "card", "account number", "card member"],
+    "card": ["card no.", "card number", "card", "account number", "account #", "account no.", "card member"],
 }
 
 DATE_FORMATS = [
@@ -116,7 +116,7 @@ def parse_date(text: str, fmt: str | None = None) -> date | None:
 def card_name_from_file(path: Path) -> str:
     """'chase-sapphire-2025.csv' -> 'Chase Sapphire'. Years and card numbers
     are dropped (the card number is added back from the file's own column)."""
-    stem = re.sub(r"(?<!\d)(19|20)\d{2}(?!\d)|(?<!\d)\d{4}(?!\d)", " ", path.stem)
+    stem = re.sub(r"(?<!\d)(19|20)\d{2}(?!\d)|(?<!\d)\d{4,6}(?!\d)", " ", path.stem)
     words = [w for w in re.split(r"[\s_\-.]+", stem) if w]
     words = [ISSUERS.get(w.lower(), w.capitalize() if w.islower() else w) for w in words]
     return " ".join(words) or path.stem
@@ -204,8 +204,8 @@ def read_csv(path: Path, formats: dict | None = None,
             continue
         last4 = re.sub(r"\D", "", cell("card"))[-4:] or re.sub(r"\D", "", spec.get("last4", ""))
         if not last4:
-            found = re.findall(r"(?<!\d)\d{4}(?!\d)", re.sub(r"(19|20)\d{2}", "", path.stem))
-            last4 = found[0] if found else ""
+            found = re.findall(r"(?<!\d)\d{4,6}(?!\d)", re.sub(r"(?<!\d)(19|20)\d{2}(?!\d)", "", path.stem))
+            last4 = found[0][-4:] if found else ""
         if last4 in card_names:
             name = card_names[last4]
         elif not last4 and card.lower() in card_names:

@@ -184,6 +184,27 @@ class DetectTests(unittest.TestCase):
         self.assertTrue(subs[0].price_changed)
 
 
+    def test_extra_card_member_judged_by_whole_account(self):
+        from subtracker.parse import Transaction
+        # The extra card's plan stops in July, but the account's files run to November.
+        rows = [Transaction(date(2026, m, 13), "GOOGLE *GOOGLE ONE", 1.99, "Extra", "a.csv") for m in range(1, 8)]
+        rows += [Transaction(date(2026, m, 6), "CRICUT", 9.99, "Main", "a.csv") for m in range(1, 8)]
+        rows += [Transaction(date(2026, m, 6), "CRICUT", 9.99, "Main", f"{m}.csv") for m in range(8, 12)]
+        subs, _ = find_subscriptions(rows, TODAY)
+        by = {s.name: s for s in subs}
+        self.assertFalse(by["Google One"].active)
+        self.assertTrue(by["Cricut"].active)
+
+    def test_account_column_names_card(self):
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "amex_99999_1.csv").write_text(
+                "Date,Description,Card Member,Account #,Amount\n"
+                "01/06/2026,CRICUT SOUTH JORDAN UT,ALEX,-99999,9.99\n"
+                "01/13/2026,GOOGLE *GOOGLE ONE,SAM,-88888,1.99\n")
+            rows, _ = read_folder(Path(d), card_names={"99999": "Main", "88888": "Extra"})
+            self.assertEqual({t.card for t in rows}, {"Main", "Extra"})
+
+
 class FeeAndReportTests(unittest.TestCase):
     def test_fees_kept_apart(self):
         from subtracker.parse import Transaction

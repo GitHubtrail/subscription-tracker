@@ -18,7 +18,7 @@ KNOWN_SERVICES = [
     ("YOUTUBE TV", "YouTube TV"), ("YOUTUBETV", "YouTube TV"), ("DROPBOX SIGN", "Dropbox Sign"),
     ("GSUITE", "Google Workspace"), ("WORKSPACE_SM", "Google Workspace"),
     ("FAX.COM", "Fax.com"), ("HUMBLEFAX", "HumbleFax"), ("EFAX", "eFax"),
-    ("ZEE5", "ZEE5"), ("SPLASHTOP", "Splashtop"), ("REMOTEPC", "RemotePC"),
+    ("ASTRA-ADDON", "Astra add-on"), ("CRICUT", "Cricut"), ("ZEE5", "ZEE5"), ("SPLASHTOP", "Splashtop"), ("REMOTEPC", "RemotePC"),
     ("ALLIANCE VIRTUAL", "Alliance Virtual Offices"), ("VOIP.MS", "VoIP.ms"),
     ("KEEPERSECURITY", "Keeper"), ("HOSTGATOR", "HostGator"), ("NAMESILO", "NameSilo"),
     ("GODADDY", "GoDaddy"), ("SQUARESPACE", "Squarespace"), ("BLOOMBERG", "Bloomberg"),
@@ -238,12 +238,16 @@ def find_subscriptions(
 
     # The latest date each card's data covers, to judge whether a
     # subscription has stopped.
-    as_of: dict[str, date] = {}
+    # An additional card on an account comes in the same file as the main
+    # card, so a card's data runs to the end of the files it appears in.
+    file_end: dict[str, date] = {}
+    card_files: dict[str, set] = defaultdict(set)
     groups: dict[tuple[str, str], list[Transaction]] = defaultdict(list)
     known_names: dict[tuple[str, str], bool] = {}
     bills: set[tuple[str, str]] = set()
     for t in transactions:
-        as_of[t.card] = max(as_of.get(t.card, t.date), t.date)
+        file_end[t.source] = max(file_end.get(t.source, t.date), t.date)
+        card_files[t.card].add(t.source)
         if t.is_fee:
             continue
         name, known = merchant_name(t.description)
@@ -253,6 +257,7 @@ def find_subscriptions(
         known_names[(name, t.card)] = known
         if not known and (BILL_CATEGORIES.search(t.category) or BILL_NAMES.search(t.description)):
             bills.add((name, t.card))
+    as_of = _data_end_by_card(card_files, file_end)
 
     subs: list[Subscription] = []
     possible: list[Possible] = []
@@ -291,7 +296,7 @@ def find_subscriptions(
             freq = _match_frequency(charges, known, forced)
             # Two charges far apart are convincing only if the price is close
             # (a yearly plan that went up), not wildly different (one-off buys).
-            if freq and len(charges) == 2 and freq[1] > 40 and not forced:
+            if freq and len(charges) == 2 and not forced:
                 lo_amt, hi_amt = sorted(t.amount for t in charges)
                 if hi_amt > lo_amt * 1.5:
                     freq = None
@@ -309,6 +314,21 @@ def find_subscriptions(
     possible.sort(key=lambda p: p.charged, reverse=True)
     return subs, possible
 
+
+
+def _data_end_by_card(card_files: dict[str, set], file_end: dict[str, date]) -> dict[str, date]:
+    """How far each card's data runs. Cards that ever share a file are on one
+    account (an additional card member, say), so they share all its files:
+    a month with no charge on the extra card still counts as covered."""
+    accounts: list[tuple[set, set]] = []  # (cards, files)
+    for card, files in card_files.items():
+        cards, files = {card}, set(files)
+        for acc in [a for a in accounts if a[1] & files]:
+            accounts.remove(acc)
+            cards |= acc[0]
+            files |= acc[1]
+        accounts.append((cards, files))
+    return {c: max(file_end[f] for f in files) for cards, files in accounts for c in cards}
 
 
 def _split_by_day(charges: list[Transaction]) -> list[list[Transaction]]:
