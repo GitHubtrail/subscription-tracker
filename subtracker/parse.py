@@ -58,7 +58,7 @@ FEE_CREDITS = re.compile(r"INTEREST ADJ|FEE REVERSAL|FEE ADJ|INTEREST CREDIT|FEE
 # Short names some banks use in their export file names.
 ISSUERS = {
     "capitalone": "Capital One", "amex": "Amex", "americanexpress": "American Express",
-    "bofa": "Bank of America", "bankofamerica": "Bank of America", "citi": "Citi",
+    "bofa": "Bank of America", "bankofamerica": "Bank of America", "citi": "Citi", "citibusiness": "CitiBusiness",
     "chase": "Chase", "discover": "Discover", "wellsfargo": "Wells Fargo", "usbank": "US Bank",
 }
 
@@ -157,9 +157,10 @@ def _usable(cols: dict) -> bool:
 
 def read_csv(path: Path, formats: dict | None = None,
              card_names: dict | None = None) -> list[Transaction]:
-    """card_names maps a card's last four digits to the name to show."""
+    """card_names maps a card's last four digits, or the card name taken from
+    the file name (for files with no card number), to the name to show."""
     spec = _format_for(path, formats or {})
-    card_names = {str(k)[-4:]: v for k, v in (card_names or {}).items()}
+    card_names = {(k[-4:] if k.isdigit() else k.lower()): v for k, v in (card_names or {}).items()}
     text = path.read_text(encoding="utf-8-sig", errors="replace")
     rows = list(csv.reader(text.splitlines()))
 
@@ -203,6 +204,8 @@ def read_csv(path: Path, formats: dict | None = None,
             last4 = found[0] if found else ""
         if last4 in card_names:
             name = card_names[last4]
+        elif not last4 and card.lower() in card_names:
+            name = card_names[card.lower()]
         else:
             name = f"{card} ••{last4}" if last4 else card
         raw.append((d, desc, amt, name, cell("category").strip()))

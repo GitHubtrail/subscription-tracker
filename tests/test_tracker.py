@@ -49,6 +49,10 @@ class ParseTests(unittest.TestCase):
         self.assertFalse(any("PAYMENT" in t.description for t in rows))
         self.assertEqual(sum(t.is_fee for t in rows), 2)
 
+    def test_card_name_by_file_name_when_no_number(self):
+        rows = read_csv(FIXTURES / "amex-gold-2026.csv", card_names={"Amex Gold": "Family Amex"})
+        self.assertEqual(rows[0].card, "Family Amex")
+
     def test_header_after_summary_lines(self):
         rows = read_csv(FIXTURES / "amex-gold-2026.csv")
         self.assertEqual(rows[0].card, "Amex Gold")

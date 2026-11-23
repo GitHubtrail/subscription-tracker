@@ -60,7 +60,9 @@ Copy `overrides.example.json` to `overrides.json` and edit it:
 }
 ```
 
-- `cards`: a name for each card, by its last four digits.
+- `cards`: a name for each card, by its last four digits. For files with no
+  card number (some Citi exports), use the card name the report shows instead,
+  for example `"CitiBusiness": "Business card"` for `citibusiness_2026.csv`.
 - `ignore`: merchants that shouldn't count as subscriptions.
 - `include`: merchants that should count even though the pattern isn't clear.
 - `rename`: nicer names. The left side is matched against the name shown in
