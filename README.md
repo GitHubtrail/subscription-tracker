@@ -21,7 +21,9 @@ It needs only Python 3.10 or newer. There is nothing to install.
    (On Windows, type `python` instead of `python3`.) It prints a summary,
    then saves and opens `report.html`. The **Download list (Excel)** button
    at the top of the report saves every subscription with its status as a
-   file Excel opens. The same list is also saved as `report.csv`.
+   file Excel opens. Each section (Active, Stopped, Check these, Bills,
+   Payment plans) shows its own total and has its own Download button.
+   The full list is also saved as `report.csv`.
 
 To have it update by itself while you add files, run
 `python3 tracker.py --watch`. It rebuilds the report whenever a file in

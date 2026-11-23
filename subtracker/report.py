@@ -137,6 +137,11 @@ def csv_text(subs: list[Subscription], possible: list[Possible] | None = None) -
     return out.getvalue()
 
 
+def _csv_href(subs: list[Subscription], possible: list[Possible] | None = None) -> str:
+    """A link target holding the CSV itself, so downloads work offline."""
+    return "data:text/csv;charset=utf-8," + quote("\ufeff" + csv_text(subs, possible))
+
+
 def write_csv(subs: list[Subscription], path: Path, possible: list[Possible] | None = None) -> None:
     # utf-8-sig so Excel reads names with accents right.
     path.write_text(csv_text(subs, possible), encoding="utf-8-sig", newline="")
@@ -148,7 +153,7 @@ def html_report(subs, possible, problems, today: date, fees: list[CardFees] | No
     e = html.escape
     # The whole list rides along inside the page, so the Download button
     # works from the saved file with no internet and no server.
-    csv_href = "data:text/csv;charset=utf-8," + quote("\ufeff" + csv_text(subs, possible))
+    csv_href = _csv_href(subs, possible)
     csv_name = f"subscriptions-{today.isoformat()}.csv"
     plans = [s for s in subs if s.is_plan]
     subs = [s for s in subs if not s.is_plan]
@@ -233,11 +238,19 @@ def html_report(subs, possible, problems, today: date, fees: list[CardFees] | No
     ) if moves else ""
     problem_html = "".join(f"<p class='problem'>{e(p)}</p>" for p in problems)
 
-    def section(title, note, head, rows):
+    def section(title, note, head, rows, total="", download=None):
+        """download is (file name part, subscriptions, possibles) for a
+        button that saves just this section."""
         if not rows:
             return ""
         ths = "".join(f"<th>{h}</th>" for h in head)
-        return (f"<h2>{title}</h2><p class='note'>{note}</p>"
+        total_html = f" <span class='total'>{e(total)}</span>" if total else ""
+        button = ""
+        if download:
+            part, items, maybe = download
+            button = (f"<a class='download small' href='{_csv_href(items, maybe)}' "
+                      f"download='subscriptions-{part}-{today.isoformat()}.csv'>Download (Excel)</a>")
+        return (f"<div class='section-head'><h2>{e(title)}{total_html}</h2>{button}</div><p class='note'>{note}</p>"
                 f"<div class='scroll'><table><thead><tr>{ths}</tr></thead><tbody>{rows}</tbody></table></div>")
 
     return f"""<!doctype html>
@@ -254,6 +267,10 @@ h1 {{ margin:0 0 4px; font-size:26px; }} h2 {{ margin:36px 0 4px; font-size:18px
 .note, .sub {{ color:var(--muted); margin:0 0 12px; }}
 .top {{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }}
 .download {{ background:var(--accent); color:var(--card); text-decoration:none; font-weight:600; font-size:14px; padding:9px 16px; border-radius:8px; white-space:nowrap; }}
+.download.small {{ font-size:13px; padding:6px 12px; }}
+.section-head {{ display:flex; align-items:flex-end; justify-content:space-between; gap:12px; flex-wrap:wrap; margin:36px 0 4px; }}
+.section-head h2 {{ margin:0; }}
+.total {{ font-weight:500; font-size:15px; color:var(--muted); margin-left:6px; }}
 .download:hover {{ filter:brightness(1.08); }}
 @media print {{ .download {{ display:none; }} }}
 .totals {{ display:flex; gap:12px; flex-wrap:wrap; margin:20px 0 8px; }}
@@ -288,20 +305,26 @@ details summary {{ cursor:pointer; color:var(--accent); white-space:nowrap; }} d
   <div class="tile"><b>{len(active)}</b><span>active subscriptions</span></div>
 </div>
 {section("Active", "Charged on schedule. Totals include only these.",
-         ["Name", "Amount", "Billed", "Card", "Next renewal", "Per month", "History"], active_rows)
+         ["Name", "Amount", "Billed", "Card", "Next renewal", "Per month", "History"], active_rows,
+         f"{_money(monthly)} a month · {_money(yearly)} a year", ("active", active, None))
  or "<p>No active subscriptions found yet. Add CSV files to the data folder and run it again.</p>"}
 {overlap_html}
 {moves_html}
 {section("Stopped or expired", "These used to charge regularly but the latest charge didn't come.",
-         ["Name", "Amount", "Billed", "Card", "Last charged", "History"], stopped_rows)}
+         ["Name", "Amount", "Billed", "Card", "Last charged", "History"], stopped_rows,
+         f"used to cost {_money(sum(s.monthly_cost for s in stopped))} a month · "
+         f"{_money(sum(s.yearly_cost for s in stopped))} a year", ("stopped", stopped, None))}
 {section("Check these", "Well-known services charged once, or at uneven times, so the billing cycle isn't clear yet.",
-         ["Name", "Amount", "Card", "Last charged", "If yearly, renews"], possible_rows)}
-{section(f"Bills and utilities · about {_money(bill_monthly)} a month",
+         ["Name", "Amount", "Card", "Last charged", "If yearly, renews"], possible_rows,
+         f"{_money(sum(p.amount for p in possible))} in latest charges", ("check-these", [], possible))}
+{section("Bills and utilities",
          "Regular household bills. The amount changes each time, so this shows the recent average. Not counted in the subscription totals.",
-         ["Name", "Average", "Billed", "Card", "Next bill (estimate)", "Per month", "History"], bill_rows)}
-{section(f"Payment plans · about {_money(plan_monthly)} a month",
+         ["Name", "Average", "Billed", "Card", "Next bill (estimate)", "Per month", "History"], bill_rows,
+         f"about {_money(bill_monthly)} a month · {_money(bill_monthly * 12)} a year", ("bills", bills, None))}
+{section("Payment plans",
          "Instalments toward a bill, such as medical or legal fees. Not counted in the subscription totals.",
-         ["Name", "Amount", "Billed", "Card", "Next payment", "History"], plan_rows)}
+         ["Name", "Amount", "Billed", "Card", "Next payment", "History"], plan_rows,
+         f"about {_money(plan_monthly)} a month", ("payment-plans", [s for s in plans if s.active], None))}
 {section("Loans", "Monthly loan payments and the interest in them. Not counted in the subscription totals.",
          ["Loan", "Monthly payment", "Next payment (estimate)", "Interest per month", "History"], loan_rows)}
 {section("Interest and fees", "Charged by the card itself. Not counted in the subscription totals.",

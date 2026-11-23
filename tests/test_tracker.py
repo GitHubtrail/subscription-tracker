@@ -342,6 +342,9 @@ class FeeAndReportTests(unittest.TestCase):
         self.assertTrue(text.startswith("\ufeffName,Type,Status,Amount,Billed,Card"))
         self.assertIn("Costco membership,Subscription,Check these,65.00", text)
         self.assertIn('download="subscriptions-2026-11-23.csv"', page)
+        self.assertIn("download='subscriptions-active-2026-11-23.csv'", page)
+        self.assertIn("download='subscriptions-check-these-2026-11-23.csv'", page)
+        self.assertIn("$65.00 in latest charges", page)
 
 
 class DownloadNameTests(unittest.TestCase):
