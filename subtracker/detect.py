@@ -21,7 +21,7 @@ KNOWN_SERVICES = [
     ("GOOGLE *TV", "Google TV"), ("MSBILL", "Microsoft"),
     ("EXTRA SPACE", "Extra Space Storage"), ("PUBLIC STORAGE", "Public Storage"),
     ("CUBESMART", "CubeSmart"), ("LIFE STORAGE", "Life Storage"), ("STORAGE RENTALS", "Storage Rentals"),
-    ("AMAZON GROCERY", "Amazon Grocery subscription"), ("AMAZON DIGI", "Amazon Digital"),
+    ("AMAZON GROCERY", "Amazon Grocery subscription"), ("AMAZON DIGI", "Amazon Digital"), ("DIGITAL PURCHASE SEATTLE", "Amazon Digital"),
     ("SHAADI", "Shaadi.com"), ("TELLO", "Tello mobile"), ("VCC COUNSELING", "VCC Counseling"),
     ("FAMILY HANDYMAN", "Family Handyman magazine"),
     ("ASTRA-ADDON", "Astra add-on"), ("CRICUT", "Cricut"), ("ZEE5", "ZEE5"), ("SPLASHTOP", "Splashtop"), ("REMOTEPC", "RemotePC"),
@@ -172,7 +172,7 @@ def _cluster_by_price(charges: list[Transaction], loose: bool) -> list[list[Tran
     for t in sorted(charges, key=lambda t: t.amount):
         if clusters:
             base = clusters[-1][0].amount
-            limit = max(1.0, base * 0.15) if loose else max(0.10, base * 0.02)
+            limit = max(0.5, base * 0.15) if loose else max(0.10, base * 0.02)
             if t.amount - base <= limit:
                 clusters[-1].append(t)
                 continue
@@ -216,6 +216,7 @@ def _about(days: float) -> str:
 
 def _make(name, card, charges, freq, as_of, today, price_changed=False, is_bill=False):
     label, days = freq
+    days = max(days, 1)
     last = charges[-1]
     first = charges[0]
     if not is_bill and abs(last.amount - first.amount) > max(0.10, first.amount * 0.02):
@@ -294,7 +295,8 @@ def find_subscriptions(
             freq = _match_frequency(charges, known=True, forced=False)
             if not freq and len(charges) >= 3:
                 gap = median((b.date - a.date).days for a, b in zip(charges, charges[1:]))
-                freq = (f"About every {max(1, round(gap / 30.44))} months", gap)
+                if gap >= 20:
+                    freq = (f"About every {max(1, round(gap / 30.44))} months", gap)
             if freq:
                 subs.append(_make(display, card, charges, freq, as_of[card], today, is_bill=True))
             continue

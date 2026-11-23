@@ -77,6 +77,19 @@ Copy `overrides.example.json` to `overrides.json` and edit it:
 - `rename`: nicer names. The left side is matched against the name shown in
   the report.
 
+## Cards that only give PDF statements
+
+Synchrony (the Amazon store card) gives monthly PDFs. Turn them into one CSV
+with:
+
+```
+python3 tools/synchrony_pdf_to_csv.py ~/Downloads/Synchrony*.pdf -o data/synchrony_1234.csv
+```
+
+Use the card's last four digits in the output name. This needs the free
+`pdftotext` program (Mac: `brew install poppler`). Run it again with all the
+PDFs whenever a new statement arrives.
+
 ## A bank's file isn't read correctly
 
 Columns are found by name, and the common names used by Capital One, Chase,
