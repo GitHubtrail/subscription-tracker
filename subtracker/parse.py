@@ -122,7 +122,7 @@ def parse_date(text: str, fmt: str | None = None) -> date | None:
 def card_name_from_file(path: Path) -> str:
     """'chase-sapphire-2025.csv' -> 'Chase Sapphire'. Years and card numbers
     are dropped (the card number is added back from the file's own column)."""
-    stem = re.sub(r"(?<!\d)(19|20)\d{2}(?!\d)|(?<!\d)\d{4,6}(?!\d)", " ", path.stem)
+    stem = re.sub(r"\d+", lambda m: " " if len(m.group()) in (4, 5, 6, 8) else m.group(), path.stem)
     words = [w for w in re.split(r"[\s_\-.]+", stem) if w]
     words = [w for w in words if w.lower() not in MONTHS]  # "January2026_0470.csv"
     words = [ISSUERS.get(w.lower(), w.capitalize() if w.islower() else w) for w in words]

@@ -30,9 +30,9 @@ def text_report(subs: list[Subscription], possible: list[Possible], problems: li
     for p in problems:
         lines.append(f"! {p}")
     bills = [s for s in subs if s.is_bill and s.active]
+    stopped = [s for s in subs if not s.active]
     subs = [s for s in subs if not s.is_bill]
     active = [s for s in subs if s.active]
-    stopped = [s for s in subs if not s.active]
     row = "{:<28} {:>10}  {:<36} {:<36} {:<14}"
     if active:
         lines.append("ACTIVE SUBSCRIPTIONS")
@@ -110,9 +110,9 @@ def html_report(subs, possible, problems, today: date, fees: list[CardFees] | No
                 moves: list[str] | None = None) -> str:
     e = html.escape
     bills = [s for s in subs if s.is_bill and s.active]
+    stopped = [s for s in subs if not s.active]
     subs = [s for s in subs if not s.is_bill]
     active = [s for s in subs if s.active]
-    stopped = [s for s in subs if not s.active]
     monthly, yearly = totals(subs)
     bill_monthly, _ = totals(bills)
 

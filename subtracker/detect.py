@@ -24,6 +24,18 @@ KNOWN_SERVICES = [
     ("AMAZON GROCERY", "Amazon Grocery subscription"), ("AMAZON DIGI", "Amazon Digital"), ("DIGITAL PURCHASE SEATTLE", "Amazon Digital"),
     ("SHAADI", "Shaadi.com"), ("TELLO", "Tello mobile"), ("VCC COUNSELING", "VCC Counseling"),
     ("FAMILY HANDYMAN", "Family Handyman magazine"),
+    ("BUFFALOGROVEORTHO", "Buffalo Grove Ortho (payment plan)"),
+    ("MY CHART", "Northwestern MyChart (medical bills)"), ("UAL*WIFI", "United in-flight Wi-Fi"),
+    ("ACCOUNTANTSWORLD", "AccountantsWorld"), ("AICPA", "AICPA insurance"),
+    ("USPS PO BOX", "USPS PO Box"),
+    ("INTUIT", "Intuit QuickBooks"), ("QUICKBOOKS", "Intuit QuickBooks"),
+    ("CORPORATE FILINGS", "Corporate Filings"), ("COR*PRATE FILINGS", "Corporate Filings"),
+    ("CORPORATEFILINGS", "Corporate Filings"), ("TESLA SUBSCRIPTION", "Tesla Premium Connectivity"),
+    ("AMAZON WEB SERVICES", "Amazon Web Services"), ("AWS EMEA", "Amazon Web Services"),
+    ("DIGITALOCEAN", "DigitalOcean"), ("CLOUDFLARE", "Cloudflare"), ("WALMART+", "Walmart+"),
+    ("WMT PLUS", "Walmart+"), ("OURARING", "Oura membership"), ("PRIME VIDEO CHANNELS", "Prime Video Channels"),
+    ("FOREIGN POLICY", "Foreign Policy magazine"), ("FOREIGN AFFAIRS", "Foreign Affairs magazine"),
+    ("TOPSTEP", "TopstepTrader"), ("CLEAR *", "CLEAR"), ("CLEARME", "CLEAR"),
     ("ASTRA-ADDON", "Astra add-on"), ("CRICUT", "Cricut"), ("ZEE5", "ZEE5"), ("SPLASHTOP", "Splashtop"), ("REMOTEPC", "RemotePC"),
     ("ALLIANCE VIRTUAL", "Alliance Virtual Offices"), ("VOIP.MS", "VoIP.ms"),
     ("KEEPERSECURITY", "Keeper"), ("HOSTGATOR", "HostGator"), ("NAMESILO", "NameSilo"),
@@ -65,11 +77,22 @@ PREFIXES = re.compile(r"^(D J|SQ|TST|SP|PP|PAYPAL|DD|IN|PY|CKO|FS|BT|BTS|WCI|GOO
 # Household bills: amounts vary from bill to bill, so they're matched on
 # timing alone and listed apart from subscriptions.
 # Household bill names that banks shorten in different ways.
-KNOWN_BILLS = [("WCI*", "WCI waste service")]
+# Government filing and licence fees: required, irregular, not subscriptions.
+GOV_FEES = re.compile(
+    r"SECRETARY OF STATE|SEC OF STATE|\bSOS\b|S\.O\.S\.|ILSOS|LICENSE FEE|LICENCE FEE|\bDMV\b|VEH RENEWAL",
+    re.I,
+)
+
+KNOWN_BILLS = [
+    ("LEXINGTON FAYETTE", "Lexington Fayette sewer/water"), ("CITY OF NAPERVILLE", "City of Naperville utilities"),
+    ("CITYOFNAP", "City of Naperville utilities"), ("NICOR", "Nicor Gas"),
+    ("WCI*", "WCI waste service"), ("ATT*", "AT&T"), ("AT&T", "AT&T"),
+    ("COMCAST", "Comcast Xfinity"), ("XFINITY", "Comcast Xfinity"), ("STATE FARM", "State Farm insurance"),
+]
 
 BILL_CATEGORIES = re.compile(r"utilit|insurance", re.I)
 BILL_NAMES = re.compile(
-    r"\b(VILLAGE OF|CITY OF|TOWN OF|COUNTY OF|WATER|SEWER|WASTE|ELECTRIC|ENERGY|POWER|"
+    r"\b(STATE FARM|ATT\*|VILLAGE OF|CITY OF|TOWN OF|COUNTY OF|WATER|SEWER|WASTE|ELECTRIC|ENERGY|POWER|"
     r"GAS CO|COMED|NICOR|PG&E|DUKE ENERGY|XFINITY|COMCAST|SPECTRUM|AT&T|VERIZON|"
     r"T-MOBILE|TMOBILE|INSURANCE|GEICO|STATE FARM|PROGRESSIVE|ALLSTATE|WCI\*)",
     re.I,
@@ -150,6 +173,7 @@ def merchant_name(description: str) -> tuple[str, bool]:
     for needle, name in KNOWN_BILLS:
         if s.startswith(needle):
             return name, False
+
     for needle, name in KNOWN_SERVICES:
         if needle in s + " ":
             return name, True
@@ -261,7 +285,7 @@ def find_subscriptions(
     for t in transactions:
         file_end[t.source] = max(file_end.get(t.source, t.date), t.date)
         card_files[t.card].add(t.source)
-        if t.is_fee or t.is_payment or is_loan(t.card):
+        if t.is_fee or t.is_payment or is_loan(t.card) or GOV_FEES.search(t.description):
             continue
         name, known = merchant_name(t.description)
         if listed(name, t.description, ignore):
@@ -292,12 +316,24 @@ def find_subscriptions(
         display = rename.get(name.lower(), name)
 
         if (name, card) in bills:
+            # A steady monthly premium can hide among one-off payments to
+            # the same company: look for it first.
+            steady = [c for c in _cluster_by_price(charges, loose=False) if len(c) >= 3]
+            found_bill = False
+            for cluster in steady:
+                freq = _match_frequency(cluster, known=False, forced=False)
+                if freq:
+                    subs.append(_make(display, card, cluster, freq, as_of[card], today, is_bill=True))
+                    found_bill = True
+            if found_bill:
+                continue
             freq = _match_frequency(charges, known=True, forced=False)
             if not freq and len(charges) >= 3:
                 gap = median((b.date - a.date).days for a, b in zip(charges, charges[1:]))
                 if gap >= 20:
                     freq = (f"About every {max(1, round(gap / 30.44))} months", gap)
             if freq:
+                freq = (freq[0].replace(" (auto top-up)", ""), freq[1])
                 subs.append(_make(display, card, charges, freq, as_of[card], today, is_bill=True))
             continue
 
@@ -323,6 +359,8 @@ def find_subscriptions(
                 if sum(len(x.charges) for x in split) >= 0.8 * len(cluster):
                     found.extend(split)
         found = _join_price_changes(found, as_of[card], today)
+        if known or forced:
+            found = _extend_on_schedule(found, charges, as_of[card], today)
         found = _fold_odd_months(found, as_of[card], today)
         if not found:
             # Maybe the price went up partway through: try all charges together.
@@ -367,6 +405,18 @@ def _data_end_by_card(card_files: dict[str, set], file_end: dict[str, date]) -> 
     return {c: max(file_end[f] for f in files) for cards, files in accounts for c in cards}
 
 
+def stale_cards(transactions: list[Transaction], today: date, days: int = 45) -> list[str]:
+    """Cards whose files stop well before today, so newer exports are missing."""
+    file_end: dict[str, date] = {}
+    card_files: dict[str, set] = defaultdict(set)
+    for t in transactions:
+        file_end[t.source] = max(file_end.get(t.source, t.date), t.date)
+        card_files[t.card].add(t.source)
+    ends = _data_end_by_card(card_files, file_end)
+    return [f"{card}: the files only go up to {_d(end)}. Download newer statements to see what's current."
+            for card, end in sorted(ends.items()) if (today - end).days > days]
+
+
 def _split_by_day(charges: list[Transaction]) -> list[list[Transaction]]:
     groups: list[list[Transaction]] = []
     for t in sorted(charges, key=lambda t: t.date.day):
@@ -401,6 +451,33 @@ def _fold_odd_months(found: list[Subscription], as_of: date, today: date) -> lis
                 main = _make(main.name, main.card, charges, ("Monthly", main.period_days), as_of, today, True)
                 out.append(main)
                 months = {(t.date.year, t.date.month) for t in main.charges}
+    return out
+
+
+def _extend_on_schedule(found: list[Subscription], charges: list[Transaction],
+                        as_of: date, today: date) -> list[Subscription]:
+    """A price rise can leave the newest charge outside its plan's price
+    group. Pull in charges that land right on schedule at a similar price."""
+    used = {id(t) for s in found for t in s.charges}
+    out = []
+    for s in found:
+        series = list(s.charges)
+        grew = True
+        while grew:
+            grew = False
+            expected = series[-1].date + timedelta(days=round(s.period_days))
+            for t in charges:
+                if id(t) in used or abs((t.date - expected).days) > 7:
+                    continue
+                lo, hi = sorted((t.amount, series[-1].amount))
+                if hi <= lo * 1.5:
+                    series.append(t)
+                    used.add(id(t))
+                    grew = True
+                    break
+        if len(series) > len(s.charges):
+            s = _make(s.name, s.card, series, (s.frequency, s.period_days), as_of, today, True)
+        out.append(s)
     return out
 
 

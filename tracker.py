@@ -14,7 +14,7 @@ import webbrowser
 from datetime import date
 from pathlib import Path
 
-from subtracker.detect import fees_by_card, find_loans, find_moves, find_overlaps, find_subscriptions
+from subtracker.detect import fees_by_card, find_loans, find_moves, find_overlaps, find_subscriptions, stale_cards
 from subtracker.parse import load_formats, read_folder
 from subtracker.report import html_report, text_report, write_csv
 
@@ -30,6 +30,7 @@ def build(data: Path, out: Path, today: date | None = None, quiet: bool = False)
     transactions, problems = read_folder(data, formats, overrides.get("cards"))
     if not transactions and not problems:
         problems.append(f"No CSV files found in {data}. Put your card exports there.")
+    problems += stale_cards(transactions, today)
     subs, possible = find_subscriptions(transactions, today, overrides)
     fees = fees_by_card(transactions)
     overlaps = find_overlaps(subs, possible)
