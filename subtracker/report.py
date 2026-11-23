@@ -25,7 +25,7 @@ def totals(subs: list[Subscription]) -> tuple[float, float]:
 
 def text_report(subs: list[Subscription], possible: list[Possible], problems: list[str],
                 fees: list[CardFees] | None = None, overlaps: list[str] | None = None,
-                loans: list[Loan] | None = None) -> str:
+                loans: list[Loan] | None = None, moves: list[str] | None = None) -> str:
     lines = []
     for p in problems:
         lines.append(f"! {p}")
@@ -48,6 +48,10 @@ def text_report(subs: list[Subscription], possible: list[Possible], problems: li
         lines.append(row.format("Name", "Amount", "Billed", "Card", "Last charged"))
         for s in stopped:
             lines.append(row.format(s.name[:28], _money(s.amount), s.frequency, s.card[:36], _d(s.last_charged)))
+        lines.append("")
+    if moves:
+        lines.append("MOVED TO ANOTHER CARD")
+        lines.extend(f"  - {n}" for n in moves)
         lines.append("")
     if overlaps:
         lines.append("POSSIBLE OVERLAPS")
@@ -102,7 +106,8 @@ def write_csv(subs: list[Subscription], path: Path) -> None:
 
 
 def html_report(subs, possible, problems, today: date, fees: list[CardFees] | None = None,
-                overlaps: list[str] | None = None, loans: list[Loan] | None = None) -> str:
+                overlaps: list[str] | None = None, loans: list[Loan] | None = None,
+                moves: list[str] | None = None) -> str:
     e = html.escape
     bills = [s for s in subs if s.is_bill and s.active]
     subs = [s for s in subs if not s.is_bill]
@@ -170,6 +175,10 @@ def html_report(subs, possible, problems, today: date, fees: list[CardFees] | No
         "<h2>Possible overlaps</h2><p class='note'>Worth checking whether you need all of these.</p><ul class='overlaps'>"
         + "".join(f"<li>{e(n)}</li>" for n in overlaps) + "</ul>"
     ) if overlaps else ""
+    moves_html = (
+        "<h2>Moved to another card</h2><p class='note'>Same service, now paid from a different card.</p>"
+        "<ul class='overlaps'>" + "".join(f"<li>{e(n)}</li>" for n in moves) + "</ul>"
+    ) if moves else ""
     problem_html = "".join(f"<p class='problem'>{e(p)}</p>" for p in problems)
 
     def section(title, note, head, rows):
@@ -222,6 +231,7 @@ details summary {{ cursor:pointer; color:var(--accent); }} details ul {{ margin:
          ["Name", "Amount", "Billed", "Card", "Next renewal", "Per month", "History"], active_rows)
  or "<p>No active subscriptions found yet. Add CSV files to the data folder and run it again.</p>"}
 {overlap_html}
+{moves_html}
 {section("Stopped or expired", "These used to charge regularly but the latest charge didn't come.",
          ["Name", "Amount", "Billed", "Card", "Last charged", "History"], stopped_rows)}
 {section("Check these", "Well-known services charged once, or at uneven times, so the billing cycle isn't clear yet.",

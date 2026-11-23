@@ -241,6 +241,17 @@ class DetectTests(unittest.TestCase):
         self.assertTrue(subs[0].is_bill)
         self.assertEqual(subs[0].card, "A + B")
 
+    def test_service_moved_to_another_card(self):
+        from subtracker.detect import find_moves
+        from subtracker.parse import Transaction
+        rows = [Transaction(date(2026, m, 3), "TELLO US", 10.38, "Old", "a") for m in range(1, 5)]
+        rows += [Transaction(date(2026, m, 1), "TELLO US", 10.39, "New", "b") for m in range(6, 11)]
+        rows.append(Transaction(date(2026, 10, 15), "GROCERY STORE", 40.0, "Old", "a"))
+        subs, possible = find_subscriptions(rows, date(2026, 10, 20))
+        notes = find_moves(subs, possible)
+        self.assertEqual(len(notes), 1)
+        self.assertIn("from Old to New", notes[0])
+
     def test_overlaps(self):
         from subtracker.detect import find_overlaps
         rows = self._monthly("Fax.com (888)429-4615 CA", 11.99, 10, range(1, 11)) + \

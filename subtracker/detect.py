@@ -451,6 +451,25 @@ def find_overlaps(subs: list[Subscription], possible: list[Possible]) -> list[st
     return notes
 
 
+def find_moves(subs: list[Subscription], possible: list[Possible]) -> list[str]:
+    """Services that stopped on one card and carried on from another."""
+    ended = [(s.name, s.card, s.last_charged) for s in subs if not s.active and not s.is_bill]
+    ended += [(p.name, p.card, p.charged) for p in possible]
+    notes = []
+    for s in subs:
+        if not s.active or s.is_bill:
+            continue
+        for name, card, last in ended:
+            if name == s.name and card != s.card and s.first_charged >= last - timedelta(days=7):
+                notes.append(f"{name} moved from {card} to {s.card} "
+                             f"(last on the old card {_d(last)}, first on the new one {_d(s.first_charged)}).")
+    return notes
+
+
+def _d(d: date) -> str:
+    return d.strftime("%b %d, %Y").replace(" 0", " ")
+
+
 def _money(x: float) -> str:
     return f"${x:,.2f}"
 
