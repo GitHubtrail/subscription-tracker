@@ -9,13 +9,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import time
 import webbrowser
 from datetime import date
 from pathlib import Path
 
 from subtracker.detect import fees_by_card, find_loans, find_moves, find_overlaps, find_subscriptions, stale_cards
-from subtracker.parse import load_formats, read_folder
+from subtracker.parse import _csv_files, load_formats, read_folder
 from subtracker.report import html_report, text_report, write_csv
 
 HERE = Path(__file__).resolve().parent
@@ -25,9 +26,9 @@ def build(data: Path, out: Path, today: date | None = None, quiet: bool = False)
     today = today or date.today()
     formats = load_formats(HERE / "formats.json")
     overrides_path = HERE / "overrides.json"
-    overrides = json.loads(overrides_path.read_text()) if overrides_path.exists() else {}
+    overrides = json.loads(overrides_path.read_text(encoding="utf-8-sig")) if overrides_path.exists() else {}
 
-    transactions, problems = read_folder(data, formats, overrides.get("cards"))
+    transactions, problems = read_folder(data, formats, overrides.get("cards"), overrides.get("files"))
     if not transactions and not problems:
         problems.append(f"No CSV files found in {data}. Put your card exports there.")
     problems += stale_cards(transactions, today)
@@ -38,7 +39,8 @@ def build(data: Path, out: Path, today: date | None = None, quiet: bool = False)
     moves = find_moves(subs, possible)
 
     out.mkdir(parents=True, exist_ok=True)
-    (out / "report.html").write_text(html_report(subs, possible, problems, today, fees, overlaps, loans, moves))
+    (out / "report.html").write_text(html_report(subs, possible, problems, today, fees, overlaps, loans, moves),
+                                  encoding="utf-8")
     write_csv(subs, out / "report.csv")
     if not quiet:
         print(text_report(subs, possible, problems, fees, overlaps, loans, moves))
@@ -46,7 +48,7 @@ def build(data: Path, out: Path, today: date | None = None, quiet: bool = False)
 
 
 def _snapshot(folder: Path) -> dict:
-    files = list(folder.glob("*.csv")) + [HERE / "overrides.json", HERE / "formats.json"]
+    files = _csv_files(folder) + [HERE / "overrides.json", HERE / "formats.json"]
     return {p: p.stat().st_mtime for p in files if p.exists()}
 
 
@@ -57,6 +59,9 @@ def main() -> None:
     ap.add_argument("--watch", action="store_true", help="keep running and rebuild when files change")
     ap.add_argument("--open", action="store_true", help="open the report in your browser")
     args = ap.parse_args()
+    # A Windows console may not have every character a merchant name uses.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
 
     build(args.data, args.out)
     if args.open:

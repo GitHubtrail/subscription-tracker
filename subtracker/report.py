@@ -103,7 +103,7 @@ def text_report(subs: list[Subscription], possible: list[Possible], problems: li
 
 
 def write_csv(subs: list[Subscription], path: Path) -> None:
-    with path.open("w", newline="") as f:
+    with path.open("w", newline="", encoding="utf-8-sig") as f:  # -sig so Excel reads it right
         w = csv.writer(f)
         w.writerow(["Name", "Type", "Status", "Amount", "Billed", "Card", "First charged",
                     "Last charged", "Next renewal", "Per month", "Per year"])

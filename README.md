@@ -10,24 +10,54 @@ It needs only Python 3.10 or newer. There is nothing to install.
 ## Use it
 
 1. Download CSV exports from each credit card website and put them in the
-   `data` folder. Any number of files, any years, any cards.
+   `data` folder. Any number of files, any years, any cards. Keep the names
+   the bank gave them; there's no need to rename anything.
 2. Run:
 
    ```
    python3 tracker.py --open
    ```
 
-   It prints a summary, then saves and opens `report.html`. It also saves
-   `report.csv` if you want the list in a spreadsheet.
+   (On Windows, type `python` instead of `python3`.) It prints a summary,
+   then saves and opens `report.html`. It also saves `report.csv` if you want
+   the list in a spreadsheet.
 
 To have it update by itself while you add files, run
 `python3 tracker.py --watch`. It rebuilds the report whenever a file in
 `data` changes. Press Ctrl+C to stop.
 
 Overlapping downloads are fine: a charge that appears in more than one file
-is counted once. If your bank gives every download the same name (Amex uses
-`activity.csv`), rename each one to start with the card, for example
-`amex_8330_1.csv`, `amex_8330_2.csv`. The four digits become the card number.
+is counted once, and all the files for one card are treated as one card.
+
+The card is read from inside each file (Capital One's "Card No.", Amex's
+"Account #", the account number at the top of a Barclays file) or from the
+bank's own file name (Chase and Bank of America put the last four digits
+there). Some downloads have no card number at all, such as Amex files
+without card member details and Citi files. Such a file takes the card of
+another file that has the same charges. If there isn't one, the report says
+which files they are. Either name them under `files` in `overrides.json`
+(see below), or put a word from the card's name in the file name, for
+example `Citi Costco 2026.csv` for a card named "Citi Costco" in `cards`.
+
+## Windows quick-start
+
+1. On the GitHub page, click **Code**, then **Download ZIP**. Right-click
+   the downloaded file and choose **Extract All**.
+2. Install Python from https://www.python.org/downloads/. On the first
+   screen of the installer, tick **Add python.exe to PATH**, then click
+   **Install Now**.
+3. Put your CSV files in the `data` folder inside the extracted folder, and
+   `overrides.json` (if you have one) next to `tracker.py`.
+4. Open the extracted folder in File Explorer, click the address bar, type
+   `cmd` and press Enter. In the window that opens, type:
+
+   ```
+   python tracker.py --open
+   ```
+
+If Windows says Python was not found, run the installer again and make sure
+**Add python.exe to PATH** is ticked. Typing `py tracker.py --open` also
+works.
 
 Your CSV files, `report.html`, `report.csv` and `overrides.json` are listed in
 `.gitignore`, so they are never committed.
@@ -65,15 +95,19 @@ Copy `overrides.example.json` to `overrides.json` and edit it:
 ```json
 {
   "cards": { "1234": "My Capital One", "5678": "Partner's Visa" },
+  "files": { "activity*.csv": "5678" },
   "ignore": ["Twilio"],
   "include": ["Corner Gym"],
   "rename": { "Foxmetrowrd": "Fox Metro water" }
 }
 ```
 
-- `cards`: a name for each card, by its last four digits. For files with no
-  card number (some Citi exports), use the card name the report shows instead,
-  for example `"CitiBusiness": "Business card"` for `citibusiness_2026.csv`.
+- `cards`: a name for each card, by its last four digits.
+- `files`: the card for files that have no card number in them, by file
+  name. `*` matches anything, so `"activity*.csv": "1234"` puts every such
+  Amex download on card 1234. A file with its own card number is never moved
+  by a pattern, and an exact file name wins over a pattern. The right side
+  can be the last four digits from `cards`, or a name.
 - `ignore`: merchants that shouldn't count as subscriptions.
 - `include`: merchants that should count even though the pattern isn't clear.
 - `payment_plans`: instalments toward a bill (a lawyer, a doctor) that should

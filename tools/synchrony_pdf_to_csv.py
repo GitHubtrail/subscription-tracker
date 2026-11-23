@@ -81,7 +81,7 @@ def main() -> None:
         rows, acct = parse_statement(pdf)
         all_rows.extend(rows)
         account = account or acct
-    with args.out.open("w", newline="") as f:
+    with args.out.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=["Date", "Description", "Amount", "Card No.", "Item"])
         w.writeheader()
         for r in all_rows:

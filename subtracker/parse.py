@@ -131,7 +131,7 @@ def card_name_from_file(path: Path) -> str:
 
 def load_formats(path: Path | None) -> dict:
     if path and path.exists():
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8-sig"))
     return {}
 
 
@@ -166,12 +166,66 @@ def _usable(cols: dict) -> bool:
     )
 
 
+def _issuer_from_header(header: list[str], preamble: list[list[str]]) -> str:
+    """Which bank wrote this file, judged by its column names (file names
+    are often just 'activity (3).csv' or 'transaction_download.csv')."""
+    h = set(header)
+    above = " ".join(" ".join(r) for r in preamble).lower()
+    if "barclays" in above or {"card last 4 digits", "purchased by"} & h:
+        return "Barclays"
+    if {"reference number", "payee"} <= h:
+        return "Bank of America"
+    if "card no." in h:
+        return "Synchrony" if "item" in h else "Capital One"
+    if {"post date", "type"} <= h:
+        return "Chase"
+    if {"status", "member name"} <= h:
+        return "Citi"
+    if header[:2] == ["date", "description"] and "amount" in h:
+        return "Amex"
+    return ""
+
+
+def _account_in_preamble(preamble: list[list[str]]) -> str:
+    """'Account Number: XXXXXXXXXXXX1488' above the header (Barclays)."""
+    for row in preamble:
+        m = re.search(r"account (?:number|no\.?|#)\s*:?\s*[x*•.\- ]*(\d{4,})", " ".join(row), re.I)
+        if m:
+            return m.group(1)[-4:]
+    return ""
+
+
+def _norm_card_names(card_names: dict | None) -> dict:
+    return {(k[-4:] if k.isdigit() else k.lower()): v for k, v in (card_names or {}).items()}
+
+
+def card_label(issuer: str, last4: str, card_names: dict) -> str:
+    """The name shown for a card: the overrides.json name, else 'Chase x1234'."""
+    if last4 in card_names:
+        return card_names[last4]
+    return f"{issuer or 'Card'} x{last4}"
+
+
 def read_csv(path: Path, formats: dict | None = None,
-             card_names: dict | None = None) -> list[Transaction]:
+             card_names: dict | None = None, files: dict | None = None) -> list[Transaction]:
     """card_names maps a card's last four digits, or the card name taken from
-    the file name (for files with no card number), to the name to show."""
+    the file name (for files with no card number), to the name to show.
+    files maps file names (wildcards allowed) to a card, for files that have
+    no card number at all."""
+    txns, issuer, known = _read(path, formats, card_names, files)
+    if not known:
+        name = _fallback_name(path, issuer, _norm_card_names(card_names)) or f"{issuer or 'Card'} (card not named)"
+        for t in txns:
+            t.card = name
+    return txns
+
+
+def _read(path: Path, formats: dict | None, card_names: dict | None,
+          files: dict | None) -> tuple[list[Transaction], str, bool]:
+    """Returns the transactions, the bank, and whether the card is known.
+    When it isn't, every transaction's card is left empty."""
     spec = _format_for(path, formats or {})
-    card_names = {(k[-4:] if k.isdigit() else k.lower()): v for k, v in (card_names or {}).items()}
+    card_names = _norm_card_names(card_names)
     text = path.read_text(encoding="utf-8-sig", errors="replace")
     rows = list(csv.reader(text.splitlines()))
 
@@ -188,7 +242,24 @@ def read_csv(path: Path, formats: dict | None = None,
             "Add this file to formats.json (see formats.example.json)."
         )
 
-    card = spec.get("card") or card_name_from_file(path)
+    from_name = card_name_from_file(path)
+    issuer = spec.get("card") or _issuer_from_header(
+        [_norm(h) for h in rows[header_idx]], rows[:header_idx])
+    named_issuer = next((ISSUERS[w.lower()] for w in re.split(r"[\s_\-.()]+", path.stem)
+                         if w.lower() in ISSUERS), "")
+    if named_issuer.startswith(issuer or "~"):  # "CitiBusiness" is more exact than "Citi"
+        issuer = named_issuer
+    issuer = issuer or named_issuer or from_name
+
+    # The card for the whole file, when the rows don't say.
+    file_card = re.sub(r"\D", "", spec.get("last4", "")) or _account_in_preamble(rows[:header_idx])
+    if not file_card:
+        found = re.findall(r"(?<!\d)\d{4,6}(?!\d)", re.sub(r"(?<!\d)(19|20)\d{2}(?!\d)", "", path.stem))
+        file_card = found[0][-4:] if found else ""
+    whole_file_name = "" if file_card else _name_for_file(path.name, files, card_names, wildcards=False)
+    if not whole_file_name and not file_card and from_name.lower() in card_names:
+        whole_file_name = card_names[from_name.lower()]  # "CitiBusiness" for citibusiness_2026.csv
+
     raw = []
     for row in rows[header_idx + 1:]:
         if not any(cell.strip() for cell in row):
@@ -203,22 +274,21 @@ def read_csv(path: Path, formats: dict | None = None,
         if not d or not desc:
             continue
         if "amount" in cols:
-            amt = parse_amount(cell("amount"))
+            amt = parse_amount(cell("amount").lstrip("="))
         else:
             debit, credit = parse_amount(cell("debit")), parse_amount(cell("credit"))
             amt = abs(debit) if debit else (-abs(credit) if credit else None)
         if amt is None:
             continue
-        last4 = re.sub(r"\D", "", cell("card"))[-4:] or re.sub(r"\D", "", spec.get("last4", ""))
-        if not last4:
-            found = re.findall(r"(?<!\d)\d{4,6}(?!\d)", re.sub(r"(?<!\d)(19|20)\d{2}(?!\d)", "", path.stem))
-            last4 = found[0][-4:] if found else ""
-        if last4 in card_names:
-            name = card_names[last4]
-        elif not last4 and card.lower() in card_names:
-            name = card_names[card.lower()]
+        if whole_file_name:
+            name = whole_file_name
         else:
-            name = f"{card} ••{last4}" if last4 else card
+            # An account number above the header covers every card on it.
+            last4 = file_card if _account_in_preamble(rows[:header_idx]) else (
+                re.sub(r"\D", "", cell("card"))[-4:] or file_card)
+            name = card_label(issuer, last4, card_names) if last4 else ""
+            if not name and "card" in cols:  # a card column, but empty on this row
+                name = _name_for_file(path.name, files, card_names, wildcards=False)
         raw.append((d, desc, amt, name, cell("category").strip()))
 
     # With a single amount column, banks disagree on whether purchases are
@@ -251,23 +321,158 @@ def read_csv(path: Path, formats: dict | None = None,
             out.append(Transaction(d, desc, round(a, 2), c, path.name, False, cat))
         elif a < 0 and NOT_PURCHASES.search(desc):
             out.append(Transaction(d, desc, round(-a, 2), c, path.name, False, cat, is_payment=True))
-    return out
+    known = all(t.card for t in out)
+    if not known:
+        for t in out:
+            t.card = ""
+    return out, issuer, known
+
+
+def _name_for_file(file_name: str, files: dict | None, card_names: dict, wildcards: bool = True) -> str:
+    """The card named for this file in overrides.json "files". Exact names
+    are checked first; patterns like "activity*.csv" only when wildcards."""
+    for pattern, card in (files or {}).items():
+        if pattern.lower() == file_name.lower() or (
+                wildcards and fnmatch.fnmatch(file_name.lower(), pattern.lower())):
+            key = card[-4:] if card.isdigit() else card.lower()
+            return card_names.get(key, card)
+    return ""
+
+
+# Words banks put in default download names ("Year to date (1).csv").
+def _loan_name(txns: list[Transaction], issuer: str, card_names: dict) -> str:
+    """A file with interest and payments but no purchases is a loan account
+    (the Amex personal loan, say). Use the one loan named in overrides.json
+    for this bank, else a name with "loan" in it so it lands under Loans."""
+    payments = {t.amount for t in txns if t.is_payment}
+    if not txns or any(not t.is_payment and not t.is_fee for t in txns) or len(payments) != 1:
+        return ""  # a loan is paid the same instalment each time
+    first = (issuer or "Card").split()[0].lower()
+    loans = {v for v in card_names.values() if "loan" in v.lower() and first in v.lower()}
+    return loans.pop() if len(loans) == 1 else f"{issuer or 'Card'} loan (card not named)"
+
+
+GENERIC_WORDS = {
+    "last", "this", "year", "years", "month", "months", "days", "date", "to", "from", "ytd", "all",
+    "recent", "current", "period", "history", "summary", "activity", "transactions", "transaction",
+    "download", "downloads", "statement", "statements", "export", "data", "file", "card", "credit",
+    "creditcard", "account", "copy",
+}
+
+
+def _fallback_name(path: Path, issuer: str, card_names: dict) -> str:
+    """A name for a file with no card number, from words in its file name:
+    a matching card in overrides.json, else the file name itself when it is
+    more than a bank's default ('amex-gold-2026.csv' -> 'Amex Gold')."""
+    hit = _name_from_words(path, issuer, card_names)
+    if hit:
+        return hit
+    words = [w for w in re.findall(r"[A-Za-z]+", path.stem)
+             if w.lower() not in GENERIC_WORDS and w.lower() not in MONTHS]
+    issuer_words = {w.lower() for w in re.findall(r"[A-Za-z]+", issuer)} | set(ISSUERS)
+    if not any(w.lower() not in issuer_words for w in words):
+        return ""
+    return " ".join(ISSUERS.get(w.lower(), w.capitalize() if w.islower() else w) for w in words)
+
+
+def _name_from_words(path: Path, issuer: str, card_names: dict) -> str:
+    """'Citi Costco Last year (2025).csv' -> the one card named with 'Costco'
+    and 'Citi' in overrides.json."""
+    words = {w.lower() for w in re.findall(r"[A-Za-z]{4,}", path.stem)}
+    words -= GENERIC_WORDS
+    words -= set(ISSUERS) - {"citibusiness"}  # 'Citi' alone says nothing about which Citi card
+    names = {v for v in card_names.values() if issuer.split()[0].lower() in v.lower()} if issuer else set()
+    hits = {v for v in names if words & {w.lower() for w in re.findall(r"[A-Za-z]+", v)}}
+    return hits.pop() if len(hits) == 1 else ""
+
+
+def _csv_files(folder: Path) -> list[Path]:
+    # Chase on a Mac saves .CSV, so don't rely on the case of the extension.
+    return sorted(p for p in folder.iterdir() if p.is_file() and p.suffix.lower() == ".csv") \
+        if folder.is_dir() else []
 
 
 def read_folder(folder: Path, formats: dict | None = None,
-                card_names: dict | None = None) -> tuple[list[Transaction], list[str]]:
-    """Read every CSV in a folder. Returns transactions and any problems found."""
-    transactions, problems = [], []
-    seen: dict[tuple, str] = {}
-    for path in sorted(folder.glob("*.csv")):
+                card_names: dict | None = None,
+                files: dict | None = None) -> tuple[list[Transaction], list[str]]:
+    """Read every CSV in a folder. Returns transactions and any problems found.
+
+    Files keep the names the bank gave them. The card comes from the file's
+    own columns where it has one. Files with no card number take the card of
+    another file they overlap with, a name in overrides.json "files", or a
+    card name that matches words in the file name."""
+    problems = []
+    read: list[tuple[Path, list[Transaction], str, bool]] = []
+    for path in _csv_files(folder):
         try:
-            for t in read_csv(path, formats, card_names):
-                # The same charge can appear in two overlapping exports.
-                key = (t.date, t.description, t.amount, t.card)
-                if seen.get(key, t.source) != t.source:
-                    continue
-                seen[key] = t.source
-                transactions.append(t)
+            read.append((path, *_read(path, formats, card_names, files)))
         except Exception as exc:  # one bad file shouldn't hide the rest
             problems.append(str(exc))
+
+    names = _norm_card_names(card_names)
+    known = [(issuer, txns) for _, txns, issuer, ok in read if ok]
+    unknown = [r for r in read if not r[3]]
+    changed = True
+    while unknown and changed:  # one match can lead to the next
+        changed = False
+        for item in list(unknown):
+            path, txns, issuer, _ = item
+            card = _overlapping_card(txns, issuer, known)
+            if card:
+                for t in txns:
+                    t.card = card
+                known.append((issuer, txns))
+                unknown.remove(item)
+                changed = True
+
+    by_issuer: dict[str, list[Path]] = {}
+    for path, txns, issuer, _ in unknown:
+        name = (_loan_name(txns, issuer, names) or _name_for_file(path.name, files, names)
+                or _fallback_name(path, issuer, names))
+        if name:
+            for t in txns:
+                t.card = name
+            continue
+        name = f"{issuer or 'Card'} (card not named)"
+        for t in txns:
+            t.card = name
+        by_issuer.setdefault(name, []).append(path)
+    for name, paths in sorted(by_issuer.items()):
+        shown = ", ".join(p.name for p in paths[:4]) + (f" and {len(paths) - 4} more" if len(paths) > 4 else "")
+        problems.append(
+            f"{len(paths)} file{'s' if len(paths) > 1 else ''} with no card number ({shown}) "
+            f"{'are' if len(paths) > 1 else 'is'} shown as \"{name}\". To name the card, add each file to "
+            f"\"files\" in overrides.json, for example \"files\": {{\"{paths[0].name}\": \"1234\"}}."
+        )
+
+    transactions = []
+    seen: dict[tuple, str] = {}
+    for _, txns, _, _ in read:
+        for t in txns:
+            # The same charge can appear in two overlapping exports.
+            key = (t.date, t.description, t.amount, t.card)
+            if seen.get(key, t.source) != t.source:
+                continue
+            seen[key] = t.source
+            transactions.append(t)
     return transactions, problems
+
+
+def _overlapping_card(txns: list[Transaction], issuer: str,
+                      known: list[tuple[str, list[Transaction]]]) -> str:
+    """The card of a known file from the same bank that has the same charges.
+    Payments are left out, since two cards are often paid the same amount on
+    the same day, and a real overlap shares a good part of the smaller file."""
+    def charges(rows):
+        return {(t.date, t.description, t.amount) for t in rows if not t.is_payment}
+
+    mine = charges(txns)
+    best, best_shared = "", 0
+    for other_issuer, other in known:
+        if other_issuer != issuer:
+            continue
+        theirs = charges(other)
+        shared = [t.card for t in other if not t.is_payment and (t.date, t.description, t.amount) in mine]
+        if len(shared) >= max(2, 0.25 * min(len(mine), len(theirs))) and len(shared) > best_shared:
+            best, best_shared = max(set(shared), key=shared.count), len(shared)
+    return best
