@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import csv
 import html
+import io
+from urllib.parse import quote
 from datetime import date
 from pathlib import Path
 
@@ -102,24 +104,52 @@ def text_report(subs: list[Subscription], possible: list[Possible], problems: li
     return "\n".join(lines)
 
 
-def write_csv(subs: list[Subscription], path: Path) -> None:
-    with path.open("w", newline="", encoding="utf-8-sig") as f:  # -sig so Excel reads it right
-        w = csv.writer(f)
-        w.writerow(["Name", "Type", "Status", "Amount", "Billed", "Card", "First charged",
-                    "Last charged", "Next renewal", "Per month", "Per year"])
-        for s in subs:
-            w.writerow([
-                s.name, "Payment plan" if s.is_plan else "Bill" if s.is_bill else "Subscription", "Active" if s.active else "Stopped", f"{s.typical:.2f}", s.frequency,
-                s.card, s.first_charged.isoformat(), s.last_charged.isoformat(),
-                s.next_renewal.isoformat() if s.active else "",
-                f"{s.monthly_cost:.2f}", f"{s.yearly_cost:.2f}",
-            ])
+CSV_HEADER = ["Name", "Type", "Status", "Amount", "Billed", "Card", "First charged",
+              "Last charged", "Next renewal", "Per month", "Per year"]
+
+
+def csv_rows(subs: list[Subscription], possible: list[Possible] | None = None) -> list[list[str]]:
+    """Every item in the report, one row each, for report.csv and the
+    report's Download button."""
+    rows = [CSV_HEADER]
+    order = sorted(subs, key=lambda s: (not s.active, s.is_bill, s.is_plan, s.name.lower()))
+    for s in order:
+        rows.append([
+            s.name, "Payment plan" if s.is_plan else "Bill" if s.is_bill else "Subscription",
+            "Active" if s.active else "Stopped", f"{s.typical:.2f}", s.frequency,
+            s.card, s.first_charged.isoformat(), s.last_charged.isoformat(),
+            s.next_renewal.isoformat() if s.active else "",
+            f"{s.monthly_cost:.2f}" if s.active else "", f"{s.yearly_cost:.2f}" if s.active else "",
+        ])
+    for p in possible or []:
+        status = (f"Renewed on {p.moved_to[0]}" if p.moved_to else
+                  "Check these (renewal missed)" if p.overdue else "Check these")
+        rows.append([
+            p.name, "Subscription", status, f"{p.amount:.2f}", "Not clear yet", p.card, "",
+            p.charged.isoformat(), "" if p.moved_to or p.times >= 3 else p.renews_if_yearly.isoformat(), "", "",
+        ])
+    return rows
+
+
+def csv_text(subs: list[Subscription], possible: list[Possible] | None = None) -> str:
+    out = io.StringIO()
+    csv.writer(out, lineterminator="\r\n").writerows(csv_rows(subs, possible))
+    return out.getvalue()
+
+
+def write_csv(subs: list[Subscription], path: Path, possible: list[Possible] | None = None) -> None:
+    # utf-8-sig so Excel reads names with accents right.
+    path.write_text(csv_text(subs, possible), encoding="utf-8-sig", newline="")
 
 
 def html_report(subs, possible, problems, today: date, fees: list[CardFees] | None = None,
                 overlaps: list[str] | None = None, loans: list[Loan] | None = None,
                 moves: list[str] | None = None) -> str:
     e = html.escape
+    # The whole list rides along inside the page, so the Download button
+    # works from the saved file with no internet and no server.
+    csv_href = "data:text/csv;charset=utf-8," + quote("\ufeff" + csv_text(subs, possible))
+    csv_name = f"subscriptions-{today.isoformat()}.csv"
     plans = [s for s in subs if s.is_plan]
     subs = [s for s in subs if not s.is_plan]
     bills = [s for s in subs if s.is_bill and s.active]
@@ -222,6 +252,10 @@ body {{ margin:0; background:var(--bg); color:var(--text); font:15px/1.5 -apple-
 main {{ margin:0 auto; padding:32px 24px 64px; }}
 h1 {{ margin:0 0 4px; font-size:26px; }} h2 {{ margin:36px 0 4px; font-size:18px; }}
 .note, .sub {{ color:var(--muted); margin:0 0 12px; }}
+.top {{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }}
+.download {{ background:var(--accent); color:var(--card); text-decoration:none; font-weight:600; font-size:14px; padding:9px 16px; border-radius:8px; white-space:nowrap; }}
+.download:hover {{ filter:brightness(1.08); }}
+@media print {{ .download {{ display:none; }} }}
 .totals {{ display:flex; gap:12px; flex-wrap:wrap; margin:20px 0 8px; }}
 .tile {{ background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 18px; min-width:160px; }}
 .tile b {{ display:block; font-size:24px; font-variant-numeric:tabular-nums; }}
@@ -244,7 +278,8 @@ details summary {{ cursor:pointer; color:var(--accent); white-space:nowrap; }} d
 .problem {{ background:var(--card); border-left:3px solid var(--warn); padding:8px 12px; }}
 </style></head>
 <body><main>
-<h1>My Subscriptions</h1>
+<div class="top"><h1>My Subscriptions</h1>
+<a class="download" href="{csv_href}" download="{csv_name}">Download list (Excel)</a></div>
 <p class="sub">From your credit card files, updated {_d(today)}. Renewals due within a week are highlighted.</p>
 {problem_html}
 <div class="totals">

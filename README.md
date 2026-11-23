@@ -19,8 +19,9 @@ It needs only Python 3.10 or newer. There is nothing to install.
    ```
 
    (On Windows, type `python` instead of `python3`.) It prints a summary,
-   then saves and opens `report.html`. It also saves `report.csv` if you want
-   the list in a spreadsheet.
+   then saves and opens `report.html`. The **Download list (Excel)** button
+   at the top of the report saves every subscription with its status as a
+   file Excel opens. The same list is also saved as `report.csv`.
 
 To have it update by itself while you add files, run
 `python3 tracker.py --watch`. It rebuilds the report whenever a file in

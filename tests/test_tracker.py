@@ -331,6 +331,18 @@ class FeeAndReportTests(unittest.TestCase):
         self.assertIn("per month", page)
         self.assertIn("Netflix", text_report(subs, possible, problems))
 
+    def test_report_has_download_button_with_the_list(self):
+        from urllib.parse import unquote
+        from subtracker.detect import Possible
+        subs, _ = find_subscriptions(read_csv(FIXTURES / "capital-one-2025.csv"), TODAY)
+        possible = [Possible("Costco membership", "Card x1234", 65.0, date(2026, 4, 1))]
+        page = html_report(subs, possible, [], TODAY)
+        href = page.split('href="data:text/csv;charset=utf-8,', 1)[1].split('"', 1)[0]
+        text = unquote(href)
+        self.assertTrue(text.startswith("\ufeffName,Type,Status,Amount,Billed,Card"))
+        self.assertIn("Costco membership,Subscription,Check these,65.00", text)
+        self.assertIn('download="subscriptions-2026-11-23.csv"', page)
+
 
 class DownloadNameTests(unittest.TestCase):
     """Files keep the names the bank gave them; the card comes from inside."""
