@@ -1,0 +1,17 @@
+{
+  "cards": {
+    "1234": "My Capital One"
+  },
+  "ignore": [
+    "Twilio"
+  ],
+  "include": [
+    "Corner Gym"
+  ],
+  "rename": {
+    "Apple (App Store / iCloud)": "Apple One"
+  },
+  "payment_plans": [
+    "Smith Law Office"
+  ]
+}
