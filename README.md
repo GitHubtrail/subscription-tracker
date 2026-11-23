@@ -45,6 +45,8 @@ Your CSV files, `report.html`, `report.csv` and `overrides.json` are listed in
 - **Bills and utilities**: water, trash and similar bills whose amount changes
   each time. Shown with the recent average and kept out of the subscription
   totals.
+- **Payment plans**: monthly instalments toward a medical, legal or similar
+  bill. Kept out of the subscription totals.
 - **Loans**: accounts whose name in `overrides.json` contains "loan", with
   the monthly payment, next payment and interest. Kept out of the totals.
 - **Interest and fees**: interest and card fees per card over the latest 12
@@ -74,6 +76,9 @@ Copy `overrides.example.json` to `overrides.json` and edit it:
   for example `"CitiBusiness": "Business card"` for `citibusiness_2026.csv`.
 - `ignore`: merchants that shouldn't count as subscriptions.
 - `include`: merchants that should count even though the pattern isn't clear.
+- `payment_plans`: instalments toward a bill (a lawyer, a doctor) that should
+  be listed as payment plans rather than subscriptions. Orthodontist,
+  dental, hospital and similar names are recognised already.
 - `rename`: nicer names. The left side is matched against the name shown in
   the report.
 

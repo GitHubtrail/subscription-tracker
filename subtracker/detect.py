@@ -24,8 +24,8 @@ KNOWN_SERVICES = [
     ("AMAZON GROCERY", "Amazon Grocery subscription"), ("AMAZON DIGI", "Amazon Digital"), ("DIGITAL PURCHASE SEATTLE", "Amazon Digital"),
     ("SHAADI", "Shaadi.com"), ("TELLO", "Tello mobile"), ("VCC COUNSELING", "VCC Counseling"),
     ("FAMILY HANDYMAN", "Family Handyman magazine"),
-    ("BUFFALOGROVEORTHO", "Buffalo Grove Ortho (payment plan)"),
-    ("MY CHART", "Northwestern MyChart (medical bills)"), ("UAL*WIFI", "United in-flight Wi-Fi"),
+    ("BUFFALOGROVEORTHO", "Buffalo Grove Ortho"),
+    ("MY CHART", "Northwestern MyChart"), ("UAL*WIFI", "United in-flight Wi-Fi"),
     ("ACCOUNTANTSWORLD", "AccountantsWorld"), ("AICPA", "AICPA insurance"),
     ("USPS PO BOX", "USPS PO Box"),
     ("INTUIT", "Intuit QuickBooks"), ("QUICKBOOKS", "Intuit QuickBooks"),
@@ -77,6 +77,13 @@ PREFIXES = re.compile(r"^(D J|SQ|TST|SP|PP|PAYPAL|DD|IN|PY|CKO|FS|BT|BTS|WCI|GOO
 # Household bills: amounts vary from bill to bill, so they're matched on
 # timing alone and listed apart from subscriptions.
 # Household bill names that banks shorten in different ways.
+# Instalments toward a bill (orthodontist, hospital, lawyer), shown apart
+# from subscriptions. Add others under "payment_plans" in overrides.json.
+PAYMENT_PLAN = re.compile(
+    r"PAYMENT PLAN|ORTHO|DENTAL|DENTIST|HOSPITAL|MYCHART|MY CHART|MEDICAL|LAW FIRM|ATTORNEY|LEGAL",
+    re.I,
+)
+
 # Government filing and licence fees: required, irregular, not subscriptions.
 GOV_FEES = re.compile(
     r"SECRETARY OF STATE|SEC OF STATE|\bSOS\b|S\.O\.S\.|ILSOS|LICENSE FEE|LICENCE FEE|\bDMV\b|VEH RENEWAL",
@@ -130,6 +137,7 @@ class Subscription:
     charges: list[Transaction] = field(repr=False, default_factory=list)
     price_changed: bool = False
     is_bill: bool = False
+    is_plan: bool = False  # paying off a debt in instalments (medical, legal), not a service
 
     @property
     def average(self) -> float:
@@ -384,6 +392,11 @@ def find_subscriptions(
             overdue = (as_of[card] - t.date).days > 365 + 14
             possible.append(Possible(display, card, t.amount, t.date, len(charges), overdue))
 
+    plans = [p.lower() for p in overrides.get("payment_plans", [])]
+    for sub in subs:
+        desc = sub.charges[-1].description
+        if PAYMENT_PLAN.search(sub.name) or PAYMENT_PLAN.search(desc) or listed(sub.name, desc, plans):
+            sub.is_plan = True
     subs.sort(key=lambda s: (s.is_bill, not s.active, s.name.lower(), s.card))
     possible.sort(key=lambda p: p.charged, reverse=True)
     return subs, possible
@@ -513,7 +526,7 @@ OVERLAP_GROUPS = {
 
 def find_overlaps(subs: list[Subscription], possible: list[Possible]) -> list[str]:
     """Plain-language notes on active subscriptions that may double up."""
-    active = [s for s in subs if s.active and not s.is_bill]
+    active = [s for s in subs if s.active and not s.is_bill and not s.is_plan]
     recent = [p for p in possible if not p.overdue]
     notes = []
     by_name: dict[str, list[Subscription]] = defaultdict(list)
@@ -532,11 +545,11 @@ def find_overlaps(subs: list[Subscription], possible: list[Possible]) -> list[st
 
 def find_moves(subs: list[Subscription], possible: list[Possible]) -> list[str]:
     """Services that stopped on one card and carried on from another."""
-    ended = [(s.name, s.card, s.last_charged) for s in subs if not s.active and not s.is_bill]
+    ended = [(s.name, s.card, s.last_charged) for s in subs if not s.active and not s.is_bill and not s.is_plan]
     ended += [(p.name, p.card, p.charged) for p in possible]
     notes = []
     for s in subs:
-        if not s.active or s.is_bill:
+        if not s.active or s.is_bill or s.is_plan:
             continue
         for name, card, last in ended:
             if name == s.name and card != s.card and s.first_charged >= last - timedelta(days=7):

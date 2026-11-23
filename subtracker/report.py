@@ -29,6 +29,8 @@ def text_report(subs: list[Subscription], possible: list[Possible], problems: li
     lines = []
     for p in problems:
         lines.append(f"! {p}")
+    plans = [s for s in subs if s.is_plan]
+    subs = [s for s in subs if not s.is_plan]
     bills = [s for s in subs if s.is_bill and s.active]
     stopped = [s for s in subs if not s.active]
     subs = [s for s in subs if not s.is_bill]
@@ -73,6 +75,14 @@ def text_report(subs: list[Subscription], possible: list[Possible], problems: li
             lines.append(row.format(s.name[:28], _money(s.average), s.frequency, s.card[:36], _d(s.next_renewal)))
         monthly, yearly = totals(bills)
         lines.append(f"\nBills total: about {_money(monthly)} a month, {_money(yearly)} a year\n")
+    if plans:
+        lines.append("PAYMENT PLANS (not counted in the totals above)")
+        lines.append(row.format("Name", "Amount", "Billed", "Card", "Next / last"))
+        for s in plans:
+            when = f"next {_d(s.next_renewal)}" if s.active else f"last {_d(s.last_charged)}"
+            lines.append(row.format(s.name[:28], _money(s.amount), s.frequency, s.card[:36], when))
+        monthly, _ = totals(plans)
+        lines.append(f"\nPayment plans: about {_money(monthly)} a month\n")
     if loans:
         lines.append("LOANS (not counted in the totals above)")
         for l in loans:
@@ -98,7 +108,7 @@ def write_csv(subs: list[Subscription], path: Path) -> None:
                     "Last charged", "Next renewal", "Per month", "Per year"])
         for s in subs:
             w.writerow([
-                s.name, "Bill" if s.is_bill else "Subscription", "Active" if s.active else "Stopped", f"{s.typical:.2f}", s.frequency,
+                s.name, "Payment plan" if s.is_plan else "Bill" if s.is_bill else "Subscription", "Active" if s.active else "Stopped", f"{s.typical:.2f}", s.frequency,
                 s.card, s.first_charged.isoformat(), s.last_charged.isoformat(),
                 s.next_renewal.isoformat() if s.active else "",
                 f"{s.monthly_cost:.2f}", f"{s.yearly_cost:.2f}",
@@ -109,6 +119,8 @@ def html_report(subs, possible, problems, today: date, fees: list[CardFees] | No
                 overlaps: list[str] | None = None, loans: list[Loan] | None = None,
                 moves: list[str] | None = None) -> str:
     e = html.escape
+    plans = [s for s in subs if s.is_plan]
+    subs = [s for s in subs if not s.is_plan]
     bills = [s for s in subs if s.is_bill and s.active]
     stopped = [s for s in subs if not s.active]
     subs = [s for s in subs if not s.is_bill]
@@ -160,6 +172,14 @@ def html_report(subs, possible, problems, today: date, fees: list[CardFees] | No
         + "".join(f"<li>{_d(t.date)} · {e(t.description)} · {_money(t.amount)}</li>" for t in reversed(f.charges))
         + "</ul></details></td></tr>"
         for f in (fees or [])
+    )
+    plan_monthly, _ = totals(plans)
+    plan_rows = "".join(
+        f"<tr><td class='name'>{e(s.name)}</td><td class='num'>{_money(s.amount)}</td><td>{e(s.frequency)}</td>"
+        f"<td>{e(s.card)}</td><td class='date'>"
+        + (f"Next {_d(s.next_renewal)}" if s.active else f"Ended, last {_d(s.last_charged)}")
+        + f"</td><td>{history(s)}</td></tr>"
+        for s in plans
     )
     loan_rows = "".join(
         f"<tr><td class='name'>{e(l.card)}</td>"
@@ -239,6 +259,9 @@ details summary {{ cursor:pointer; color:var(--accent); }} details ul {{ margin:
 {section(f"Bills and utilities · about {_money(bill_monthly)} a month",
          "Regular household bills. The amount changes each time, so this shows the recent average. Not counted in the subscription totals.",
          ["Name", "Average", "Billed", "Card", "Next bill (estimate)", "Per month", "History"], bill_rows)}
+{section(f"Payment plans · about {_money(plan_monthly)} a month",
+         "Instalments toward a bill, such as medical or legal fees. Not counted in the subscription totals.",
+         ["Name", "Amount", "Billed", "Card", "Next payment", "History"], plan_rows)}
 {section("Loans", "Monthly loan payments and the interest in them. Not counted in the subscription totals.",
          ["Loan", "Monthly payment", "Next payment (estimate)", "Interest per month", "History"], loan_rows)}
 {section("Interest and fees", "Charged by the card itself. Not counted in the subscription totals.",

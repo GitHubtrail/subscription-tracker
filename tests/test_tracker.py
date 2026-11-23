@@ -252,6 +252,16 @@ class DetectTests(unittest.TestCase):
         self.assertEqual(len(notes), 1)
         self.assertIn("from Old to New", notes[0])
 
+    def test_payment_plans_kept_apart(self):
+        from subtracker.report import totals
+        rows = self._monthly("WWWBUFFALOGROVEORTHO", 261.67, 11, range(6, 11)) + \
+            self._monthly("HOWARD AND HOWARD", 1000.0, 15, range(8, 11)) + \
+            self._monthly("NETFLIX.COM", 15.49, 3, range(6, 11))
+        subs, _ = find_subscriptions(rows, date(2026, 10, 20), {"payment_plans": ["howard"]})
+        plans = sorted(s.name for s in subs if s.is_plan)
+        self.assertEqual(len(plans), 2)
+        self.assertAlmostEqual(totals([s for s in subs if not s.is_plan])[0], 15.49, places=1)
+
     def test_overlaps(self):
         from subtracker.detect import find_overlaps
         rows = self._monthly("Fax.com (888)429-4615 CA", 11.99, 10, range(1, 11)) + \
